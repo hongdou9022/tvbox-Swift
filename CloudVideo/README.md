@@ -124,7 +124,7 @@ open CloudVideo.xcodeproj
 
 选中 `CloudVideo` scheme，设置你的开发者 Team，`Cmd + R`。
 
-> 工程没有内置 App 图标，Xcode 会给出警告但不影响运行。要换图标就在 `Assets.xcassets` 里补一个 `AppIcon` 并打开 `ASSETCATALOG_COMPILER_APPICON_NAME`。
+工程已内置 1024×1024 的 App 图标（蓝紫渐变 + 播放三角），要换就在 `Assets.xcassets/AppIcon.appiconset` 里替换 `icon-1024.png`。
 
 ### 没有 Mac 怎么验证？
 
