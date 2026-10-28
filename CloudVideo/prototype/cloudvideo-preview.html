@@ -188,6 +188,18 @@
   .setrow{display:flex;align-items:center;gap:10px;margin:19px 14px 30px;padding:14px;border-radius:10px;background:var(--deep);font-size:14px;}
   .setrow .c{margin-left:auto;color:var(--t4);font-size:11px;}
 
+  .lgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+  .chan{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px;border-radius:10px;
+    background:var(--deep);font-size:12px;color:var(--t2);cursor:pointer;}
+  .chan .tv{font-size:11px;color:var(--accent);}
+  .chan span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  /* ---------- 弹幕 ---------- */
+  .dms{position:absolute;inset:0;overflow:hidden;pointer-events:none;}
+  .dm-item{position:absolute;font-size:15px;font-weight:500;color:#fff;white-space:nowrap;
+    text-shadow:0 1px 2px rgba(0,0,0,.8);animation:dmMove linear infinite;}
+  @keyframes dmMove{from{transform:translateX(0)}to{transform:translateX(-460px)}}
+
   /* ---------- Tab ---------- */
   .tabbar{flex:none;height:74px;display:flex;padding-bottom:14px;background:rgba(14,15,19,.97);border-top:1px solid rgba(255,255,255,.06);}
   .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:10px;color:var(--t4);cursor:pointer;}
@@ -312,6 +324,12 @@
         <div class="vbox">
           <div class="glow"></div>
           <div class="vlabel">AVPLAYER SURFACE</div>
+          <div class="dms">
+            <div class="dm-item" style="top:58px;left:100%;animation-duration:9s">这特效太顶了</div>
+            <div class="dm-item" style="top:86px;left:130%;animation-duration:11s;color:#6BE38F">等了三年终于来了</div>
+            <div class="dm-item" style="top:114px;left:160%;animation-duration:10s">汉斯·季默的配乐绝了</div>
+            <div class="dm-item" style="top:142px;left:190%;animation-duration:12s;color:#F5C24A">前方高能</div>
+          </div>
           <div class="vtop">
             <div class="ico" data-go="s-home">‹</div>
             <div class="ttl">沙丘 2</div>
@@ -411,9 +429,13 @@
 
       <section class="screen" id="s-live">
         <div class="statusbar"><span>9:41</span><span class="ic"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="bat"><i></i></span></span></div>
-        <div style="padding:10px 14px 14px;font-size:17px;font-weight:700">直播</div>
-        <div class="scroll" style="display:flex;align-items:center;justify-content:center;color:var(--t4);font-size:13px;text-align:center;line-height:2">
-          还没有直播源<br>在服务端添加 IPTV 订阅后<br>频道会出现在这里
+        <div style="padding:10px 14px 0;display:flex;align-items:center">
+          <div style="font-size:17px;font-weight:700">直播</div>
+          <div style="margin-left:auto;font-size:11px;color:var(--t4)">128 个频道</div>
+        </div>
+        <div class="channels" id="liveGroups" style="padding-top:12px"></div>
+        <div class="scroll" style="padding:0 14px 20px">
+          <div class="lgrid" id="liveGrid"></div>
         </div>
         <nav class="tabbar" data-tab></nav>
       </section>
@@ -430,7 +452,9 @@
     <div class="k"><b>分类</b><span>无轮播 · 无限滚动 · 没有更多了</span></div>
     <div class="k"><b>搜索</b><span>范围选择 · 最近热搜 · 匹配度排序</span></div>
     <div class="k"><b>详情</b><span>竖屏 16:9 · 收藏即时 · 4 列剧集</span></div>
-    <div class="k"><b>播放器</b><span>单行控件 · 横屏全屏 · 锁屏</span></div>
+    <div class="k"><b>播放器</b><span>单行控件 · 横屏全屏 · 锁屏 · 弹幕</span></div>
+    <div class="k"><b>投屏</b><span>局域网发现 :10081 · 配对 · 失败回落服务端</span></div>
+    <div class="k"><b>直播</b><span>IPTV 分组 · m3u/txt 解析</span></div>
     <div class="sw">
       <i style="background:#0E0F13"></i><i style="background:#151823"></i>
       <i style="background:#2BD576"></i><i style="background:#FF7800"></i>
@@ -518,6 +542,15 @@ document.getElementById('resume').innerHTML = MOVIES.slice(0,4).map((m,i)=>`
   </div>`).join('');
 
 document.getElementById('favs').innerHTML = MOVIES.slice(0,6).map(card).join('');
+
+const LIVE_GROUPS = ['央视','卫视','影视','体育','少儿'];
+document.getElementById('liveGroups').innerHTML = LIVE_GROUPS.map((n,i)=>
+  `<div class="ch ${i===0?'on':''}" data-lg="${i}"><span>${n}</span><b></b></div>`).join('');
+
+const LIVE_CHANNELS = ['CCTV-1 综合','CCTV-5 体育','CCTV-6 电影','CCTV-13 新闻',
+  '湖南卫视','浙江卫视','东方卫视','江苏卫视','北京卫视','广东卫视','凤凰中文','翡翠台'];
+document.getElementById('liveGrid').innerHTML = LIVE_CHANNELS.map(n=>
+  `<div class="chan" data-go="s-detail"><span class="tv">▣</span><span>${n}</span></div>`).join('');
 
 const TABS = [
   {n:'首页', id:'s-home',  p:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>'},

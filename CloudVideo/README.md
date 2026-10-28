@@ -30,23 +30,50 @@ OmniBox 媒体服务器的 iOS 客户端，严格按 `Box/docs/PHONE_UI_SPEC.md`
 | 4.4 结果排序 | ✅ | `SearchRanker`：完全 → 前缀 → 包含 → 分词，再按源优先级 |
 | 5.1 详情结构 | ✅ | 16:9 播放区、20sp 标题 + 38dp 收藏、信息行、多源卡片、4 列剧集 |
 | 5.2 竖屏控件 | ✅ | 播放 34 / 时间 11sp / 进度 2dp 橙 / 清晰度 12 / 弹 12 / 全屏 32 |
+| 5.2 弹幕 | ✅ | 按「片名 年份 集名」匹配，解析 XML/JSON/纯文本，Canvas 逐帧渲染 |
 | 5.3 多源卡片 | ✅ | 选中绿描边 + 深绿底；单源整块隐藏 |
 | 5.4 收藏 | ✅ | 空心白 / 实心橙，点击立即切换，失败回滚 |
 | 5.5 详情弹层 | ✅ | 拖拽条、78×110 海报、概要（过滤 HTML）、来源 |
 | 5.6 横屏全屏 | ✅ | 转屏、锁屏、底部两行、返回先退全屏并回竖屏 |
-| 5.7 推送电视 | ⚠️ | 面板 UI 与文案完整，设备发现未接（见下） |
-| 6 电视 / 直播 | ⚠️ | 页面骨架与空态就位，规范标注「本次不涉及改动」 |
+| 5.7 推送电视 | ✅ | 局域网发现 + 配对 + 推送，失败回落服务端单槽 |
+| 6 电视 / 直播 | ✅ | 局域网设备列表；IPTV 源解析 m3u/txt，分组播放 |
 | 7 我的 | ✅ | 账号、继续观看、收藏、设置入口 |
 | 8 状态文案 | ✅ | 全部按规范原文，见 `Components.swift` 与各 ViewModel |
 | 9 iOS 注意事项 | ✅ | pt 1:1、竖屏锁定、LazyVGrid 复用、海报圆角 10、`#1A1B22` 占位、安全区 |
 
-### 未完成项
+### 三项补充实现说明
 
-1. **推送电视（5.7）**：面板交互与文案已实现，但设备发现依赖后端
-   `/api/app/v1/devices` 的注册 / 配对流程（需要先 `POST /devices/register`
-   拿到设备 ID 才能查 `pairs`），当前只做到「扫描中 → 没找到电视」的闭环。
-2. **电视 / 直播（第 6 章）**：规范明确「本次不涉及改动」，只落了页面结构与空态。
-3. **弹幕**：开关状态与视觉已按规范实现，未接 `/api/app/v1/danmaku` 的渲染。
+**1. 推送电视（5.7）**
+
+协议来自电视端 `Box/.../remote/PairingServer.java` 与 `omni/phone/PhoneCastSheet.java`：
+
+| 环节 | 实现 |
+| --- | --- |
+| 发现 | 本机各 IPv4 网段 /24 全量探测 + 回环，`GET http://<ip>:10081/v2/info`，校验 `magic == "OMNIBOX_TV"`，并发 24、单请求 1.5s |
+| 归属过滤 | `omniHost` 必须与当前后端 host 一致，避免列出别人的电视 |
+| 配对 | `POST /v2/pair` body `{deviceId, deviceName}` → `{token}`，token 存本地 |
+| 推送 | `POST /v2/push`，header `X-Box-Token`，body 为载荷 |
+| 回落 | 局域网失败 → 后端 `POST /devices/:id/pair` + `/push`，文案「已发送到服务器，电视下次前台时收取」 |
+| 记忆 | 上次连过的设备置顶（`lastDevice`） |
+
+载荷：`{sourceType, libraryId, videoId, line, episode, episodeId, positionMs, title}`。
+
+> 首次连接局域网地址会触发 iOS 的「本地网络」权限弹窗，需要允许，否则扫不到电视。
+
+**2. 电视 / 直播（第 6 章）**
+
+- 电视：复用同一套发现层，列出局域网设备 + 配对状态，支持重新扫描。
+- 直播：`GET /api/iptv/enabled` → 每个源优先用内嵌 `content`，否则拉 `url`；
+  解析 M3U（`#EXTINF` + `group-title` / `tvg-logo`）与 TXT（`分组,#genre#`）；
+  同名频道合并；播放复用同一套播放器（横屏 + 锁屏）。
+
+**3. 弹幕**
+
+- `POST /api/app/v1/danmaku` body `{fileName}`，`fileName = "片名 年份 集名"`（空项跳过，
+  与电视端 `OmniDanmaku.buildFileName` 一致）。返回的是**弹幕文件列表**，内容需自行下载。
+- 解析兼容三种格式：B 站 XML（`<d p="...">`）、JSON 数组、纯文本行；GBK 兜底。
+- 渲染：`TimelineView(.animation)` + `Canvas`，用「最后进度回调 + 墙钟增量」插值，
+  6 条泳道，二分查找可视窗口，单帧最多 80 条。开关状态与设置页联动。
 
 ---
 
@@ -68,6 +95,10 @@ OmniBox 媒体服务器的 iOS 客户端，严格按 `Box/docs/PHONE_UI_SPEC.md`
 | 搜索源 | `GET /api/app/v1/search-sources` |
 | 收藏状态 | `GET /api/favorite/check?vodId=&sourceId=` |
 | 收藏增删 | `POST /api/favorite` / `DELETE /api/favorite/:id` |
+| 直播源 | `GET /api/iptv/enabled` |
+| 弹幕 | `POST /api/app/v1/danmaku` |
+| 设备配对 | `POST /api/app/v1/devices/:id/pair` |
+| 设备推送 | `POST /api/app/v1/devices/:id/push` |
 
 统一响应封装 `{code, message, data, success}`，401 直接抛 `unauthorized`。
 除登录外全部带 `Authorization: Bearer <token>`。
@@ -99,7 +130,10 @@ CloudVideo/
 │   │   ├── SessionStore.swift      # 登录态 + Keychain
 │   │   ├── Keychain.swift
 │   │   ├── ImagePipeline.swift     # 带 Referer 的海报加载
-│   │   └── SearchRanker.swift      # 4.4 匹配度排序
+│   │   ├── SearchRanker.swift      # 4.4 匹配度排序
+│   │   ├── CastService.swift       # 5.7 局域网发现 / 配对 / 推送
+│   │   ├── LiveService.swift       # 6 IPTV 源解析
+│   │   └── DanmakuService.swift    # 弹幕匹配与解析
 │   └── Features/
 │       ├── Login/ Home/ Search/ Detail/ Player/
 │       ├── Cast/ TV/ Live/ Mine/ Settings/
