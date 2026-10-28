@@ -1,9 +1,20 @@
 import SwiftUI
 import UIKit
 
+/// 通过 AppDelegate 接管屏幕方向，实现「详情/播放页固定竖屏，仅全屏允许横屏」（规范 9.2）。
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        supportedInterfaceOrientationsFor window: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        OrientationLock.mask
+    }
+}
+
 @main
 struct CloudVideoApp: App {
-    @StateObject private var app = AppState()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var session = SessionStore.shared
 
     init() {
         Self.configureAppearance()
@@ -12,31 +23,29 @@ struct CloudVideoApp: App {
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(app)
-                .environmentObject(LibraryStore.shared)
+                .environmentObject(session)
                 .preferredColorScheme(.dark)
-                .task {
-                    await app.bootstrap()
+                .onAppear {
+                    session.bootstrap()
                 }
         }
     }
 
-    /// 把导航栏压成透明，让页面渐变背景能透上去。
     private static func configureAppearance() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-        appearance.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        let navigation = UINavigationBarAppearance()
+        navigation.configureWithTransparentBackground()
+        navigation.titleTextAttributes = [.foregroundColor: UIColor.white]
+        navigation.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
 
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
+        UINavigationBar.appearance().standardAppearance = navigation
+        UINavigationBar.appearance().scrollEdgeAppearance = navigation
+        UINavigationBar.appearance().compactAppearance = navigation
 
-        let tabAppearance = UITabBarAppearance()
-        tabAppearance.configureWithOpaqueBackground()
-        tabAppearance.backgroundColor = UIColor(Theme.bgRaised)
+        let tab = UITabBarAppearance()
+        tab.configureWithOpaqueBackground()
+        tab.backgroundColor = UIColor(Theme.bgHome)
 
-        UITabBar.appearance().standardAppearance = tabAppearance
-        UITabBar.appearance().scrollEdgeAppearance = tabAppearance
+        UITabBar.appearance().standardAppearance = tab
+        UITabBar.appearance().scrollEdgeAppearance = tab
     }
 }

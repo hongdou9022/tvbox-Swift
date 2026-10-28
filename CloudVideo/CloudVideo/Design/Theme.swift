@@ -1,65 +1,77 @@
 import SwiftUI
 import UIKit
 
-/// 云影视设计系统：深空底色 + 蓝紫渐变，整体走"影院暗场"质感。
+/// 设计系统 —— 严格对齐 `Box/docs/PHONE_UI_SPEC.md` 第 0 章。
+///
+/// 尺寸单位为 dp，iOS 按 pt 1:1 使用（见规范 9.1）。
 enum Theme {
 
-    // MARK: - 底色
+    // MARK: - 0.1 配色
 
-    /// 页面最底层背景
-    static let bg = Color(hex: 0x06070B)
-    /// 次级背景（Tab 栏、分组条）
-    static let bgRaised = Color(hex: 0x0C0F18)
-    /// 卡片面板
-    static let panel = Color(hex: 0x141826)
-    /// 高亮面板 / 未选中标签
-    static let panelHigh = Color(hex: 0x1D2334)
-    /// 分隔线
-    static let divider = Color.white.opacity(0.07)
-
-    // MARK: - 文字
+    /// 详情 / 播放页底色
+    static let bgDetail = Color(hex: 0x151823)
+    /// 首页 / 搜索 / 我的底色
+    static let bgHome = Color(hex: 0x0E0F13)
+    /// 主题强调色：选中态、来源名、集数徽标文字
+    static let accent = Color(hex: 0x2BD576)
+    /// 播放器进度强调：进度条、当前集、已收藏
+    static let playAccent = Color(hex: 0xFF7800)
 
     static let textPrimary = Color.white
-    static let textSecondary = Color.white.opacity(0.62)
-    static let textTertiary = Color.white.opacity(0.36)
+    /// 元信息、辅助说明
+    static let textSecondary = Color(hex: 0x9AA0AB)
+    /// 提示
+    static let textWeak = Color(hex: 0x7D8291)
+    /// 页脚
+    static let textFaint = Color(hex: 0x5F6470)
 
-    // MARK: - 品牌色
+    /// 未选中卡片 / 按钮
+    static let card = Color(hex: 0x2C303C)
+    /// 输入框、海报占位
+    static let cardDeep = Color(hex: 0x1A1B22)
+    /// 输入框描边
+    static let inputBorder = Color(hex: 0x2A2C33)
 
-    static let accent = Color(hex: 0x4C8DFF)
-    static let accent2 = Color(hex: 0x9B6BFF)
-    static let gold = Color(hex: 0xF7C25C)
-    static let danger = Color(hex: 0xFF5D67)
+    /// 弹幕开关打开态
+    static let danmakuOn = Color(hex: 0x6BE38F)
+    /// 弹幕开关关闭态
+    static let danmakuOff = Color(hex: 0x8A8FA3)
 
-    // MARK: - 渐变
+    // MARK: - 0.3 圆角与间距
 
-    static let accentGradient = LinearGradient(
-        colors: [Color(hex: 0x4C8DFF), Color(hex: 0x9B6BFF)],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
+    static let radiusCard: CGFloat = 10
+    static let radiusEpisode: CGFloat = 8
+    static let radiusInput: CGFloat = 18
+    static let radiusSheet: CGFloat = 20
 
-    static let pageGradient = LinearGradient(
-        colors: [Color(hex: 0x0B0F1A), Color(hex: 0x05060A)],
-        startPoint: .top,
-        endPoint: .bottom
-    )
+    /// 首页 / 详情左右内边距
+    static let padPage: CGFloat = 14
+    /// 列表网格
+    static let padGrid: CGFloat = 9
+    /// 弹层
+    static let padSheet: CGFloat = 20
+    /// 分区之间垂直间距
+    static let sectionGap: CGFloat = 19
 
-    /// 海报底部用于压住文字的黑渐变
-    static let posterScrim = LinearGradient(
-        colors: [Color.black.opacity(0.75), Color.black.opacity(0.0)],
-        startPoint: .bottom,
-        endPoint: .center
-    )
+    // MARK: - 0.2 字号
 
-    // MARK: - 尺寸
+    static func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight)
+    }
 
-    static let cardRadius: CGFloat = 12
-    static let panelRadius: CGFloat = 20
-    static let pagePadding: CGFloat = 16
+    /// 影片标题（详情页）
+    static let fontTitle = font(20, .bold)
+    /// 分区标题
+    static let fontSection = font(17, .bold)
+    /// 卡片标题
+    static let fontCardTitle = font(13, .bold)
+    /// 卡片元信息
+    static let fontCardMeta = font(10)
+    /// 徽标 / 角标
+    static let fontBadge = font(9)
 }
 
 extension Color {
-    /// 用 0xRRGGBB 形式的整数构造颜色，避免到处写浮点。
     init(hex: UInt32, opacity: Double = 1) {
         let r = Double((hex >> 16) & 0xFF) / 255.0
         let g = Double((hex >> 8) & 0xFF) / 255.0
@@ -69,28 +81,43 @@ extension Color {
 }
 
 extension View {
-    /// 统一的页面背景（含安全区）。
-    func pageBackground() -> some View {
-        background(Theme.pageGradient.ignoresSafeArea())
+    /// 首页 / 搜索 / 我的
+    func homeBackground() -> some View {
+        background(Theme.bgHome.ignoresSafeArea())
     }
 
-    /// 给普通视图加一点"卡片悬浮"的投影。
-    func cardShadow() -> some View {
-        shadow(color: Color.black.opacity(0.45), radius: 10, x: 0, y: 6)
+    /// 详情 / 播放页
+    func detailBackground() -> some View {
+        background(Theme.bgDetail.ignoresSafeArea())
     }
 }
 
-/// 轻量触觉反馈。
-enum Haptics {
-    static func tap() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+// MARK: - 屏幕方向
+
+/// 详情/播放页固定竖屏，仅全屏时允许横屏（规范 9.2）。
+enum OrientationLock {
+    /// 当前允许的方向，由 AppDelegate 读取。
+    static var mask: UIInterfaceOrientationMask = .portrait
+
+    /// 切到竖屏。
+    static func portrait() {
+        apply(.portrait)
     }
 
-    static func select() {
-        UISelectionFeedbackGenerator().selectionChanged()
+    /// 切到横屏（用于全屏播放）。
+    static func landscape() {
+        apply(.landscapeRight)
     }
 
-    static func success() {
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    private static func apply(_ target: UIInterfaceOrientationMask) {
+        mask = target
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first else { return }
+
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: target))
+        scene.windows.forEach { window in
+            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
     }
 }

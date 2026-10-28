@@ -1,75 +1,124 @@
 import SwiftUI
 import Combine
 
+/// 搜索页状态（规范第 4 章）。
 @MainActor
 final class SearchViewModel: ObservableObject {
-    @Published var keyword = ""
-    @Published private(set) var results: [Video] = []
-    @Published private(set) var isSearching = false
-    @Published var message: String?
-    @Published private(set) var history: [String] = []
 
+    /// 搜索范围（规范 4.1）。
+    enum Scope: Hashable {
+        case all
+        case source(id: String, name: String)
+
+        var title: String {
+            switch self {
+            case .all: return "全站"
+            case .source(_, let name): return name
+            }
+        }
+    }
+
+    @Published var keyword = ""
+    @Published var scope: Scope = .all
+    @Published private(set) var sources: [SearchSource] = []
+    @Published private(set) var results: [MediaItem] = []
+    @Published private(set) var isSearching = false
+    @Published private(set) var statusText: String?
+    @Published private(set) var history: [String] = []
+    @Published private(set) var hotWords: [String] = []
+
+    private let api = APIClient.shared
     private let historyKey = "cloudvideo.search.history"
-    private var searchTask: Task<Void, Never>?
+    private var didPrepare = false
 
     init() {
         history = UserDefaults.standard.stringArray(forKey: historyKey) ?? []
     }
 
-    func search(app: AppState) async {
-        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+    // MARK: - 准备
 
-        let sources = app.searchableSources
-        guard !sources.isEmpty else {
-            message = "当前配置里没有可搜索的源"
-            return
+    func prepareIfNeeded() async {
+        guard !didPrepare else { return }
+        didPrepare = true
+
+        let list = try? await api.searchSources()
+        if let list {
+            sources = list
+        }
+        await loadHotWords()
+    }
+
+    /// 规范 4.2：热搜词取自本地搜索历史 + 首页热播标题，最多 6 条。
+    private func loadHotWords() async {
+        var words: [String] = []
+
+        for word in history where words.count < 6 {
+            if !words.contains(word) { words.append(word) }
         }
 
-        searchTask?.cancel()
-        isSearching = true
-        message = nil
-        results = []
-
-        remember(trimmed)
-
-        let found = await VodService.shared.searchAll(sources: sources, keyword: trimmed)
-        guard !Task.isCancelled else { return }
-
-        // 同名同源的重复结果去掉
-        var seen = Set<String>()
-        var unique: [Video] = []
-        for video in found {
-            let key = video.sourceKey + "|" + video.id
-            if seen.insert(key).inserted {
-                unique.append(video)
+        if words.count < 6 {
+            let recommend = try? await api.recommend()
+            let titles = (recommend?.sections ?? []).flatMap { $0.items }.map { $0.title }
+            for title in titles where words.count < 6 {
+                if !title.isEmpty, !words.contains(title) {
+                    words.append(title)
+                }
             }
         }
 
-        results = unique
-        isSearching = false
-
-        if unique.isEmpty {
-            message = "没有找到「\(trimmed)」相关的内容"
-        }
+        hotWords = words
     }
 
-    func useKeyword(_ text: String, app: AppState) {
-        keyword = text
-        Task { await search(app: app) }
-    }
+    // MARK: - 搜索
 
-    func clearResults() {
-        searchTask?.cancel()
+    func search() async {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        remember(trimmed)
+        isSearching = true
         results = []
-        message = nil
+        statusText = "搜索中…"
+
+        let sourceId: String?
+        switch scope {
+        case .all: sourceId = nil
+        case .source(let id, _): sourceId = id
+        }
+
+        do {
+            let page = try await api.search(keyword: trimmed, page: 1, sourceId: sourceId)
+
+            let priority = Dictionary(
+                uniqueKeysWithValues: sources.enumerated().map { ($1.id, $0) }
+            )
+            results = SearchRanker.rank(page.items, keyword: trimmed, priority: priority)
+
+            let returnedSources = Set(results.map { $0.libraryId }).count
+            if results.isEmpty {
+                statusText = "没有找到「\(trimmed)」"
+            } else {
+                statusText = "已返回 \(returnedSources) 个来源（查询 \(sources.count) 个站点）"
+            }
+        } catch {
+            statusText = error.localizedDescription
+        }
+
         isSearching = false
     }
 
-    func clearHistory() {
-        history.removeAll()
-        UserDefaults.standard.set(history, forKey: historyKey)
+    func useKeyword(_ text: String) async {
+        keyword = text
+        await search()
     }
+
+    func clear() {
+        keyword = ""
+        results = []
+        statusText = nil
+    }
+
+    // MARK: - 历史
 
     private func remember(_ text: String) {
         history.removeAll { $0 == text }
@@ -77,6 +126,11 @@ final class SearchViewModel: ObservableObject {
         if history.count > 12 {
             history = Array(history.prefix(12))
         }
+        UserDefaults.standard.set(history, forKey: historyKey)
+    }
+
+    func clearHistory() {
+        history.removeAll()
         UserDefaults.standard.set(history, forKey: historyKey)
     }
 }

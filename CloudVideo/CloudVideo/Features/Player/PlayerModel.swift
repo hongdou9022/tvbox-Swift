@@ -2,7 +2,7 @@ import AVFoundation
 import Combine
 import UIKit
 
-/// 播放内核：把 AVPlayer 的状态收敛成几个可观察字段，方便 UI 直接绑定。
+/// 播放内核。竖屏内联与横屏全屏共用同一个实例，切换时画面不中断。
 @MainActor
 final class PlayerModel: ObservableObject {
     @Published private(set) var isPlaying = false
@@ -10,16 +10,14 @@ final class PlayerModel: ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var failed = false
-    @Published var rate: Float = 1.0
 
     let player = AVPlayer()
 
-    /// 播放结束回调，由外层注入（自动下一集）。
     var onEnd: (() -> Void)?
 
     private var timeObserver: Any?
-    private var itemStatusObservation: NSKeyValueObservation?
     private var timeControlObservation: NSKeyValueObservation?
+    private var itemStatusObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var pendingSeek: Double = 0
 
@@ -28,9 +26,6 @@ final class PlayerModel: ObservableObject {
         player.automaticallyWaitsToMinimizeStalling = true
         observePlayer()
     }
-
-    // 观察者的清理交给 stop()：AVPlayer 与 model 同生命周期，
-    // 在 deinit 里访问 actor 隔离状态容易触发并发检查，得不偿失。
 
     // MARK: - 观察
 
@@ -66,7 +61,6 @@ final class PlayerModel: ObservableObject {
         if seconds.isFinite, seconds >= 0 {
             currentTime = seconds
         }
-
         if let itemDuration = player.currentItem?.duration.seconds,
            itemDuration.isFinite, itemDuration > 0,
            abs(itemDuration - duration) > 0.5 {
@@ -76,7 +70,7 @@ final class PlayerModel: ObservableObject {
 
     // MARK: - 载入
 
-    func load(urlString: String, startAt: Double) {
+    func load(urlString: String, headers: [String: String], startAt: Double) {
         guard let url = Self.sanitize(urlString) else {
             failed = true
             isBuffering = false
@@ -89,7 +83,14 @@ final class PlayerModel: ObservableObject {
         isBuffering = true
         pendingSeek = max(0, startAt)
 
-        let item = AVPlayerItem(url: url)
+        // 部分源需要 Referer / UA 才能拉到流
+        var options: [String: Any] = [:]
+        if !headers.isEmpty {
+            options["AVURLAssetHTTPHeaderFieldsKey"] = headers
+        }
+        let asset = AVURLAsset(url: url, options: options.isEmpty ? nil : options)
+        let item = AVPlayerItem(asset: asset)
+
         player.replaceCurrentItem(with: item)
 
         itemStatusObservation = item.observe(\.status, options: [.new, .initial]) { [weak self] item, _ in
@@ -150,7 +151,6 @@ final class PlayerModel: ObservableObject {
 
     func play() {
         player.play()
-        player.rate = rate
     }
 
     func pause() {
@@ -178,7 +178,6 @@ final class PlayerModel: ObservableObject {
     }
 
     func setRate(_ value: Float) {
-        rate = value
         if isPlaying {
             player.rate = value
         }
@@ -196,7 +195,6 @@ final class PlayerModel: ObservableObject {
 
     // MARK: - 工具
 
-    /// 剧集地址里常见中文、空格，直接 `URL(string:)` 会返回 nil。
     static func sanitize(_ raw: String) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -209,5 +207,12 @@ final class PlayerModel: ObservableObject {
             return url
         }
         return nil
+    }
+}
+
+/// 轻量触觉反馈。
+enum Haptics {
+    static func tap() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 }

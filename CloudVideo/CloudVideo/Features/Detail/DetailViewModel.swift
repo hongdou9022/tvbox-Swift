@@ -1,31 +1,35 @@
 import SwiftUI
 import Combine
 
+/// 详情 / 播放页状态（规范第 5 章）。
 @MainActor
 final class DetailViewModel: ObservableObject {
-    @Published private(set) var detail: VodDetail?
+
+    @Published private(set) var detail: MediaDetail?
     @Published private(set) var isLoading = false
-    @Published var errorText: String?
+    @Published var errorMessage: String?
 
-    @Published var lineIndex = 0
-    @Published var episodeIndex = 0
-    /// 从历史记录恢复的播放进度（秒）。
-    @Published private(set) var resumeSeconds: Double = 0
+    /// 当前线路（源）
+    @Published private(set) var sourceIndex = 0
+    /// 当前剧集
+    @Published private(set) var episodeIndex = 0
+    @Published private(set) var playInfo: PlayInfo?
+    @Published private(set) var isLoadingPlay = false
 
+    @Published private(set) var isFavorited = false
+    private var favoriteId: String?
+
+    private let api = APIClient.shared
+    private var target: MediaTarget?
     private var loadedKey = ""
 
     // MARK: - 派生数据
 
-    var lines: [PlayLine] { detail?.lines ?? [] }
+    var sources: [PlaySource] { detail?.playSources ?? [] }
 
     var episodes: [Episode] {
-        guard lines.indices.contains(lineIndex) else { return [] }
-        return lines[lineIndex].episodes
-    }
-
-    var currentLineName: String {
-        guard lines.indices.contains(lineIndex) else { return "" }
-        return lines[lineIndex].name
+        guard sources.indices.contains(sourceIndex) else { return [] }
+        return sources[sourceIndex].episodes
     }
 
     var currentEpisode: Episode? {
@@ -33,95 +37,172 @@ final class DetailViewModel: ObservableObject {
         return episodes[episodeIndex]
     }
 
-    var hasNext: Bool {
-        episodeIndex + 1 < episodes.count
+    var currentSourceName: String {
+        guard sources.indices.contains(sourceIndex) else {
+            return detail?.libraryName ?? ""
+        }
+        return sources[sourceIndex].name
     }
 
-    var hasLines: Bool { lines.count > 1 }
+    /// 规范 5.3：只有一个源时整块隐藏。
+    var hasMultipleSources: Bool { sources.count > 1 }
 
-    var title: String { detail?.name ?? "" }
+    var hasNext: Bool { episodeIndex + 1 < episodes.count }
+
+    var playURL: String { playInfo?.url ?? "" }
+    var playHeaders: [String: String] { playInfo?.header ?? [:] }
+    var qualities: [PlayURLVariant] {
+        let list = playInfo?.urls ?? []
+        return list.isEmpty ? [] : list
+    }
+
+    var title: String { detail?.title ?? target?.title ?? "" }
+    var poster: String { detail?.poster ?? target?.poster ?? "" }
 
     // MARK: - 加载
 
-    func load(video: Video, source: SourceBean) async {
-        let key = source.key + "|" + video.id
+    func load(target: MediaTarget) async {
+        self.target = target
+        let key = target.libraryId + "|" + target.videoId
         guard key != loadedKey else { return }
 
         isLoading = true
-        errorText = nil
+        errorMessage = nil
 
         do {
-            guard let result = try await VodService.shared.detail(for: source, videoID: video.id) else {
-                errorText = "没有取到详情数据"
-                isLoading = false
-                return
-            }
+            let result = try await api.media(
+                libraryId: target.libraryId,
+                videoId: target.videoId,
+                sourceType: target.sourceType
+            )
             detail = result
             loadedKey = key
-            restoreHistory(for: video)
+
+            sourceIndex = 0
+            episodeIndex = 0
+            await loadPlayInfo()
+            await refreshFavorite()
         } catch {
-            // 失败时不写入 loadedKey，返回上一页再进来还能重试
-            errorText = error.localizedDescription
+            errorMessage = error.localizedDescription
         }
 
         isLoading = false
     }
 
-    /// 有历史记录时恢复到上次的线路 / 剧集 / 进度。
-    private func restoreHistory(for video: Video) {
-        guard let entry = LibraryStore.shared.historyEntry(for: video) else { return }
+    func loadPlayInfo() async {
+        guard let target, let episode = currentEpisode else { return }
 
-        if let index = lines.firstIndex(where: { $0.name == entry.lineName }) {
-            lineIndex = index
-        } else {
-            lineIndex = 0
+        isLoadingPlay = true
+        do {
+            playInfo = try await api.play(
+                libraryId: target.libraryId,
+                videoId: target.videoId,
+                line: sourceIndex,
+                episode: episodeIndex,
+                sourceType: target.sourceType
+            )
+        } catch {
+            playInfo = nil
+            errorMessage = error.localizedDescription
         }
-
-        if episodes.indices.contains(entry.episodeIndex) {
-            episodeIndex = entry.episodeIndex
-        } else {
-            episodeIndex = 0
-        }
-
-        resumeSeconds = max(entry.progress, 0)
+        isLoadingPlay = false
     }
 
-    // MARK: - 交互
+    // MARK: - 选择
 
-    func selectLine(_ index: Int) {
-        guard lines.indices.contains(index), index != lineIndex else { return }
-        lineIndex = index
+    func selectSource(_ index: Int) async {
+        guard sources.indices.contains(index), index != sourceIndex else { return }
+        sourceIndex = index
         episodeIndex = 0
-        resumeSeconds = 0
-        Haptics.select()
+        await loadPlayInfo()
     }
 
-    func selectEpisode(_ index: Int) {
+    func selectEpisode(_ index: Int) async {
         guard episodes.indices.contains(index) else { return }
+        guard index != episodeIndex || playInfo == nil else { return }
         episodeIndex = index
-        resumeSeconds = 0
-        Haptics.tap()
+        await loadPlayInfo()
+    }
+
+    func selectVariant(_ variant: PlayURLVariant) async {
+        guard !variant.url.isEmpty, variant.url != playInfo?.url else { return }
+        // 清晰度切换只换地址，保留当前线路与剧集
+        playInfo = PlayInfo(
+            url: variant.url,
+            urls: playInfo?.urls,
+            header: playInfo?.header,
+            flag: playInfo?.flag,
+            parse: playInfo?.parse
+        )
     }
 
     @discardableResult
-    func playNext() -> Bool {
+    func playNext() async -> Bool {
         guard hasNext else { return false }
         episodeIndex += 1
-        resumeSeconds = 0
+        await loadPlayInfo()
         return true
     }
 
-    // MARK: - 记录进度
+    // MARK: - 收藏（规范 5.4）
 
-    func persistProgress(video: Video, seconds: Double, duration: Double) {
-        guard detail != nil else { return }
-        LibraryStore.shared.record(
-            video: video,
-            lineName: currentLineName,
-            episodeIndex: episodeIndex,
-            episodeName: currentEpisode?.name ?? "第\(episodeIndex + 1)集",
-            progress: seconds,
-            duration: duration
-        )
+    private func refreshFavorite() async {
+        guard let target else { return }
+        guard let status = try? await api.favoriteStatus(
+            vodId: target.videoId,
+            sourceId: target.libraryId
+        ) else { return }
+        isFavorited = status.isFavorited
+        favoriteId = status.favorite?.id
+    }
+
+    /// 点击后立即切换图标，失败回滚。
+    func toggleFavorite() async {
+        guard let target, let detail else { return }
+
+        let previous = isFavorited
+        isFavorited.toggle()
+
+        do {
+            if previous {
+                if let favoriteId {
+                    try await api.removeFavorite(id: favoriteId)
+                }
+                self.favoriteId = nil
+            } else {
+                try await api.addFavorite(
+                    title: detail.title,
+                    vodId: target.videoId,
+                    sourceId: target.libraryId,
+                    coverImage: detail.poster ?? "",
+                    remark: detail.remark ?? "",
+                    rating: Double(detail.score ?? "") ?? 0
+                )
+                await refreshFavorite()
+            }
+        } catch {
+            isFavorited = previous
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    // MARK: - 进度上报
+
+    func saveProgress(position: Double, duration: Double) {
+        guard let target, let detail, let episode = currentEpisode else { return }
+        guard position > 1 else { return }
+
+        Task {
+            try? await api.saveProgress(
+                libraryId: target.libraryId,
+                videoId: target.videoId,
+                title: detail.title,
+                poster: detail.poster ?? "",
+                playId: episode.playId,
+                episodeName: episode.name,
+                positionMs: Int64(position * 1000),
+                durationMs: Int64(max(duration, 0) * 1000)
+            )
+        }
     }
 }

@@ -4,8 +4,7 @@ import ImageIO
 
 /// 图片加载与缓存。
 ///
-/// 不用 `AsyncImage` 的原因：大量资源站的图片有防盗链，必须带 Referer / UA 才能取到，
-/// 而 `AsyncImage` 不支持自定义请求头，海报会整片加载不出来。
+/// 豆瓣海报有防盗链，必须带 Referer 才能取到，所以不能用 `AsyncImage`。
 @MainActor
 final class ImagePipeline {
     static let shared = ImagePipeline()
@@ -24,20 +23,24 @@ final class ImagePipeline {
     }
 
     func cached(_ urlString: String) -> UIImage? {
-        cache.object(forKey: urlString as NSString)
+        guard !urlString.isEmpty else { return nil }
+        return cache.object(forKey: urlString as NSString)
     }
 
     func load(_ urlString: String) async -> UIImage? {
         guard !urlString.isEmpty else { return nil }
         if let hit = cached(urlString) { return hit }
-        guard let url = Self.resolve(urlString) else { return nil }
+        guard let url = URL(string: urlString), url.scheme != nil else { return nil }
 
         var request = URLRequest(url: url)
         request.setValue(
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
             forHTTPHeaderField: "User-Agent"
         )
-        if let host = url.host {
+        // 规范 9.7：豆瓣接口需要 Referer，海报同理
+        if let host = url.host, host.contains("douban") {
+            request.setValue("https://m.douban.com", forHTTPHeaderField: "Referer")
+        } else if let host = url.host {
             request.setValue("https://\(host)/", forHTTPHeaderField: "Referer")
         }
 
@@ -58,20 +61,6 @@ final class ImagePipeline {
         cache.removeAllObjects()
     }
 
-    /// 统一处理海报地址：补协议、修正已知防盗链域名。
-    static func resolve(_ raw: String) -> URL? {
-        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-
-        if text.hasPrefix("//") {
-            text = "https:" + text
-        }
-        guard text.hasPrefix("http") else { return nil }
-
-        return URL(string: text)
-    }
-
-    /// 解码时直接生成缩略图，避免大图占满内存。
     private static func downsample(data: Data, maxPixel: CGFloat) -> UIImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return UIImage(data: data)
@@ -91,18 +80,15 @@ final class ImagePipeline {
     }
 }
 
-/// 通用远程图片视图，带占位与失败态。
+/// 远程图片。占位底色用规范 0.1 的卡片深底 `#1A1B22`（见 9.4）。
 struct RemoteImage: View {
     let urlString: String
     var contentMode: ContentMode = .fill
-    var cornerRadius: CGFloat = 0
+    var cornerRadius: CGFloat = Theme.radiusCard
 
     @State private var image: UIImage?
-    @State private var failed = false
 
     var body: some View {
-        // 用 Color.clear 当尺寸基准：它会严格接受父级给的尺寸，
-        // 图片再在 overlay 里铺满并裁剪，避免 .fill 撑破卡片。
         Color.clear
             .overlay {
                 if let image {
@@ -110,26 +96,18 @@ struct RemoteImage: View {
                         .resizable()
                         .aspectRatio(contentMode: contentMode)
                 } else {
-                    Theme.panelHigh
-                        .overlay(
-                            Image(systemName: failed ? "photo" : "film")
-                                .font(.system(size: 20, weight: .light))
-                                .foregroundStyle(Theme.textTertiary)
-                        )
+                    Theme.cardDeep
                 }
             }
             .clipped()
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .task(id: urlString) {
-                failed = false
                 if let hit = ImagePipeline.shared.cached(urlString) {
                     image = hit
                     return
                 }
                 image = nil
-                let loaded = await ImagePipeline.shared.load(urlString)
-                image = loaded
-                failed = loaded == nil
+                image = await ImagePipeline.shared.load(urlString)
             }
     }
 }

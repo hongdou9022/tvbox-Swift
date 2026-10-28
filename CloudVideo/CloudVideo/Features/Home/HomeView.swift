@@ -1,259 +1,218 @@
 import SwiftUI
 
-/// 首页：顶部源切换 + 推荐位 + 分类横滑 + 海报瀑布流。
+/// 首页（规范第 3 章）。
 struct HomeView: View {
-    @EnvironmentObject private var app: AppState
+    @EnvironmentObject private var session: SessionStore
     @StateObject private var vm = HomeViewModel()
-    @State private var showSourcePicker = false
+    @State private var path = NavigationPath()
 
     private let columns = [
-        GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 12)
+        GridItem(.flexible(), spacing: Theme.padGrid),
+        GridItem(.flexible(), spacing: Theme.padGrid),
+        GridItem(.flexible(), spacing: Theme.padGrid)
     ]
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
-                topBar
+                searchBar
+                channelBar
                 content
             }
-            .pageBackground()
+            .homeBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: Video.self) { video in
-                DetailView(video: video)
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                case .detail(let target):
+                    DetailView(target: target)
+                case .search(let keyword):
+                    SearchScreen(initialKeyword: keyword, showsBackButton: true)
+                }
             }
         }
         .task {
-            await vm.loadIfNeeded(app: app)
-        }
-        .onChange(of: app.currentSource) { _, _ in
-            Task { await vm.reload(app: app) }
-        }
-        .sheet(isPresented: $showSourcePicker) {
-            SourcePickerSheet()
-                .presentationDetents([.medium, .large])
-                .presentationBackground(Theme.bgRaised)
+            await vm.loadIfNeeded()
         }
     }
 
-    // MARK: - 顶栏
+    // MARK: - 搜索栏
 
-    private var topBar: some View {
+    private var searchBar: some View {
         HStack(spacing: 10) {
-            Button {
-                showSourcePicker = true
-            } label: {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(Theme.accentGradient)
-                        .frame(width: 7, height: 7)
+            NavigationLink(value: Route.search("")) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textFaint)
 
-                    Text(app.currentSource?.name ?? "云影视")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
+                    Text("搜索更多影视")
+                        .font(Theme.font(13))
+                        .foregroundStyle(Theme.textFaint)
 
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(Theme.textTertiary)
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 14))
+                        .foregroundStyle(Theme.textWeak)
                 }
+                .padding(.horizontal, 14)
+                .frame(height: 36)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Theme.cardDeep)
+                )
             }
-            .buttonStyle(PressScaleStyle(scale: 0.96))
-
-            Spacer()
-
-            CircleIconButton(systemName: "arrow.clockwise") {
-                Task { await vm.reload(app: app) }
-            }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, Theme.pagePadding)
+        .padding(.horizontal, Theme.padPage)
         .padding(.top, 6)
         .padding(.bottom, 10)
+    }
+
+    // MARK: - 频道栏
+
+    private var channelBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 22) {
+                ForEach(HomeViewModel.Channel.allCases) { item in
+                    Button {
+                        Task { await vm.select(item) }
+                    } label: {
+                        VStack(spacing: 5) {
+                            Text(item.rawValue)
+                                .font(Theme.font(15, vm.channel == item ? .bold : .regular))
+                                .foregroundStyle(vm.channel == item ? Theme.accent : Theme.textSecondary)
+
+                            // 规范 3.1：选中为绿色文字 + 下方 3dp 绿色短横线（宽 18dp）
+                            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                                .fill(Theme.accent)
+                                .frame(width: 18, height: 3)
+                                .opacity(vm.channel == item ? 1 : 0)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.padPage)
+        }
+        .padding(.bottom, 12)
     }
 
     // MARK: - 内容
 
     @ViewBuilder
     private var content: some View {
-        if vm.isLoading && vm.videos.isEmpty && vm.featured.isEmpty {
+        if vm.isLoading && vm.sections.isEmpty && vm.gridItems.isEmpty {
             VStack {
                 Spacer()
-                LoadingRow(text: "正在连接片源")
+                ProgressView().tint(Theme.accent)
                 Spacer()
             }
-        } else if let error = vm.errorText, vm.videos.isEmpty, vm.featured.isEmpty {
-            ScrollView {
-                EmptyStateView(
-                    icon: "antenna.radiowaves.left.and.right.slash",
-                    title: "这个源暂时连不上",
-                    subtitle: error,
-                    actionTitle: "重试"
-                ) {
-                    Task { await vm.reload(app: app) }
-                }
-                .padding(.top, 60)
-            }
+        } else if let error = vm.errorMessage, vm.sections.isEmpty && vm.gridItems.isEmpty {
+            EmptyHintView(icon: "wifi.exclamationmark", text: error)
+        } else if vm.channel.isRecommend {
+            recommendContent
         } else {
-            ScrollView(showsIndicators: false) {
-                LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
-                    if !vm.featured.isEmpty {
-                        heroSection
-                    }
-
-                    Section {
-                        gridSection
-                    } header: {
-                        categoryBar
-                    }
-                }
-                .padding(.bottom, 24)
-            }
-            .refreshable {
-                await vm.reload(app: app)
-            }
+            categoryContent
         }
     }
 
-    // MARK: - 推荐位
+    // MARK: - 推荐页
 
-    private var heroSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "本周热门", trailing: "\(vm.featured.count) 部")
-
-            TabView {
-                ForEach(vm.featured.prefix(6)) { video in
-                    NavigationLink(value: video) {
-                        HeroCard(video: video)
+    private var recommendContent: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: Theme.sectionGap) {
+                if !vm.banners.isEmpty {
+                    BannerCarousel(items: vm.banners) { item in
+                        openRecommend(item)
                     }
-                    .buttonStyle(PressScaleStyle(scale: 0.985))
+                    .padding(.horizontal, Theme.padPage)
+                }
+
+                // 规范 3.2-2：分区顺序由后端给定，空分区整块跳过
+                ForEach(vm.sections) { section in
+                    sectionBlock(section)
+                }
+
+                if vm.sections.isEmpty {
+                    EmptyHintView(icon: "sparkles", text: "暂无推荐内容")
                 }
             }
-            .tabViewStyle(.page(indexDisplayMode: .always))
-            .indexViewStyle(.page(backgroundDisplayMode: .interactive))
-            .frame(height: 186)
+            .padding(.bottom, 24)
         }
-        .padding(.horizontal, Theme.pagePadding)
+        .refreshable {
+            await vm.reload()
+        }
     }
 
-    // MARK: - 分类条
+    private func sectionBlock(_ section: RecommendSection) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitleBar(title: section.title)
+                .padding(.horizontal, Theme.padPage)
 
-    private var categoryBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(vm.categories) { category in
-                    Button {
-                        Haptics.select()
-                        Task { await vm.select(category, app: app) }
-                    } label: {
-                        TagChip(
-                            text: category.name,
-                            selected: vm.selectedCategory?.id == category.id
+            LazyVGrid(columns: columns, spacing: 14) {
+                // 规范 3.2-3：每区只铺 6 个
+                ForEach(section.items.prefix(6)) { item in
+                    NavigationLink(value: Route.recommend(item)) {
+                        MediaCard(
+                            title: item.title,
+                            poster: item.poster ?? "",
+                            badge: item.type ?? "",
+                            rating: item.rating,
+                            meta: item.subtitle ?? ""
                         )
                     }
-                    .buttonStyle(PressScaleStyle())
+                    .buttonStyle(TapScaleStyle())
                 }
             }
-            .padding(.horizontal, Theme.pagePadding)
-            .padding(.vertical, 10)
+            .padding(.horizontal, Theme.padGrid)
         }
-        .background(Theme.bg.opacity(0.96))
     }
 
-    // MARK: - 网格
+    // MARK: - 分类页
 
-    private var gridSection: some View {
-        Group {
-            if vm.videos.isEmpty {
-                EmptyStateView(
-                    icon: "film.stack",
-                    title: "这个分类还没有内容",
-                    subtitle: "换个分类或源试试"
-                )
-            } else {
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(vm.videos) { video in
-                        NavigationLink(value: video) {
-                            PosterCard(video: video)
-                        }
-                        .buttonStyle(PressScaleStyle(scale: 0.96))
-                        .onAppear {
-                            Task { await vm.loadMoreIfNeeded(currentItem: video, app: app) }
-                        }
+    private var categoryContent: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVGrid(columns: columns, spacing: 14) {
+                ForEach(vm.gridItems) { item in
+                    NavigationLink(value: Route.media(item)) {
+                        MediaCard(
+                            title: item.title,
+                            poster: item.poster ?? "",
+                            badge: item.typeName ?? "",
+                            rating: Double(item.score ?? ""),
+                            meta: item.metaLine
+                        )
+                    }
+                    .buttonStyle(TapScaleStyle())
+                    .onAppear {
+                        Task { await vm.loadMoreIfNeeded(currentItem: item) }
                     }
                 }
-                .padding(.horizontal, Theme.pagePadding)
-
-                if vm.isLoadingMore {
-                    LoadingRow(text: "加载更多")
-                } else if !vm.hasMore && vm.videos.count > 12 {
-                    Text("— 已经到底了 —")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary)
-                        .padding(.vertical, 18)
-                }
             }
-        }
-    }
-}
+            .padding(.horizontal, Theme.padGrid)
 
-// MARK: - 源选择
-
-struct SourcePickerSheet: View {
-    @EnvironmentObject private var app: AppState
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(app.sources) { source in
-                        row(for: source)
-                    }
-                }
-                .padding(Theme.pagePadding)
-            }
-            .background(Theme.bgRaised)
-            .navigationTitle("切换数据源")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
-                        .foregroundStyle(Theme.accent)
-                }
-            }
+            footer
         }
     }
 
-    private func row(for source: SourceBean) -> some View {
-        Button {
-            app.selectSource(source)
-            dismiss()
-        } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(source.name)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(source.isSupported ? Theme.textPrimary : Theme.textTertiary)
-
-                    Text(source.isSupported ? source.typeLabel : "\(source.typeLabel) · 暂不支持")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary)
-                }
-
-                Spacer()
-
-                if app.currentSource?.key == source.key {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundStyle(Theme.accent)
-                }
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.04))
-            )
+    @ViewBuilder
+    private var footer: some View {
+        if vm.isLoadingMore {
+            ListFooterView(state: .loading)
+        } else if vm.gridItems.isEmpty && !vm.isLoading {
+            ListFooterView(state: .empty)
+        } else if vm.reachedEnd {
+            ListFooterView(state: .noMore)
+        } else {
+            Color.clear.frame(height: 12)
         }
-        .buttonStyle(PressScaleStyle(scale: 0.98))
-        .disabled(!source.isSupported)
+    }
+
+    // MARK: - 跳转
+
+    private func openRecommend(_ item: RecommendItem) {
+        path.append(Route.recommend(item))
     }
 }

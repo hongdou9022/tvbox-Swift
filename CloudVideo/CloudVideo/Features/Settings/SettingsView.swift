@@ -1,206 +1,154 @@
 import SwiftUI
 
-/// 设置：配置地址、数据源列表、缓存与数据管理。
+/// 播放器偏好（规范 7：清晰度偏好、弹幕偏好、播放器解码方式）。
+enum PlayerPreferences {
+    private static let defaults = UserDefaults.standard
+
+    private enum Keys {
+        static let quality = "cloudvideo.pref.quality"
+        static let danmaku = "cloudvideo.pref.danmaku"
+        static let decoder = "cloudvideo.pref.decoder"
+    }
+
+    static var quality: String {
+        get { defaults.string(forKey: Keys.quality) ?? "自动" }
+        set { defaults.set(newValue, forKey: Keys.quality) }
+    }
+
+    static var danmakuEnabled: Bool {
+        get { defaults.object(forKey: Keys.danmaku) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Keys.danmaku) }
+    }
+
+    static var decoder: String {
+        get { defaults.string(forKey: Keys.decoder) ?? "系统解码" }
+        set { defaults.set(newValue, forKey: Keys.decoder) }
+    }
+
+    static let qualityOptions = ["自动", "高清", "超清", "蓝光", "2K", "4K"]
+    static let decoderOptions = ["系统解码", "硬解优先", "软解优先"]
+}
+
+/// 设置页（规范 7）。
 struct SettingsView: View {
-    @EnvironmentObject private var app: AppState
-    @EnvironmentObject private var library: LibraryStore
+    @EnvironmentObject private var session: SessionStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var configInput = ""
-    @State private var showResetConfirm = false
-    @State private var showClearHistoryConfirm = false
+    @State private var quality = PlayerPreferences.quality
+    @State private var danmaku = PlayerPreferences.danmakuEnabled
+    @State private var decoder = PlayerPreferences.decoder
+    @State private var showLogoutConfirm = false
 
     var body: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 22) {
-                configSection
-                sourceSection
-                storageSection
+            VStack(spacing: 20) {
+                serverSection
+                playbackSection
                 aboutSection
             }
-            .padding(.horizontal, Theme.pagePadding)
+            .padding(.horizontal, Theme.padPage)
             .padding(.top, 8)
             .padding(.bottom, 40)
         }
-        .pageBackground()
+        .homeBackground()
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            configInput = app.configURL
-        }
-        .alert("更换配置后需要重新加载", isPresented: $showResetConfirm) {
+        .alert("断开连接？", isPresented: $showLogoutConfirm) {
             Button("取消", role: .cancel) {}
-            Button("确定", role: .destructive) {
-                app.reset()
-                dismiss()
+            Button("断开", role: .destructive) {
+                session.logout()
             }
         } message: {
-            Text("当前的收藏和历史记录会保留。")
-        }
-        .alert("清空观看历史？", isPresented: $showClearHistoryConfirm) {
-            Button("取消", role: .cancel) {}
-            Button("清空", role: .destructive) {
-                library.clearHistory()
-            }
+            Text("需要重新输入服务器地址和密码才能连接。")
         }
     }
 
-    // MARK: - 配置
+    // MARK: - 服务器
 
-    private var configSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("配置")
-
-            VStack(alignment: .leading, spacing: 10) {
-                TextField("配置地址", text: $configInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textPrimary)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-                    .padding(12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.05))
-                    )
-
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await app.loadConfig(configInput) }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if app.isLoading {
-                                ProgressView().tint(.white).scaleEffect(0.8)
-                            }
-                            Text(app.isLoading ? "加载中…" : "重新加载")
-                        }
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 40)
-                        .background(Theme.accentGradient, in: Capsule())
-                    }
-                    .buttonStyle(PressScaleStyle())
-
-                    Button {
-                        showResetConfirm = true
-                    } label: {
-                        Text("更换")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(Theme.textSecondary)
-                            .frame(width: 76, height: 40)
-                            .background(Capsule().fill(Theme.panelHigh))
-                    }
-                    .buttonStyle(PressScaleStyle())
-                }
-
-                if let error = app.errorText {
-                    Text(error)
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.danger)
-                }
-            }
-            .padding(14)
-            .panel(radius: 16)
-        }
-    }
-
-    // MARK: - 数据源
-
-    private var sourceSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("数据源（\(app.sources.count)）")
+    private var serverSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("服务器")
 
             VStack(spacing: 0) {
-                ForEach(Array(app.sources.enumerated()), id: \.element.id) { index, source in
-                    Button {
-                        app.selectSource(source)
-                    } label: {
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(app.currentSource?.key == source.key ? Theme.accent : Color.white.opacity(0.15))
-                                .frame(width: 6, height: 6)
+                infoRow("地址", session.serverAddress)
+                Divider().background(Color.white.opacity(0.06))
+                infoRow("账号", session.user?.username ?? "—")
+                Divider().background(Color.white.opacity(0.06))
 
-                            Text(source.name)
-                                .font(.system(size: 13))
-                                .foregroundStyle(source.isSupported ? Theme.textSecondary : Theme.textTertiary)
-                                .lineLimit(1)
+                Button {
+                    showLogoutConfirm = true
+                } label: {
+                    HStack {
+                        Text("断开连接")
+                            .font(Theme.font(13))
+                            .foregroundStyle(Color(hex: 0xFF6B6B))
+                        Spacer()
+                    }
+                    .padding(.vertical, 13)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
+                    .fill(Theme.cardDeep)
+            )
+        }
+    }
 
-                            Spacer()
+    // MARK: - 播放
 
-                            Text(source.isSupported ? source.typeLabel : "\(source.typeLabel) 不支持")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.textTertiary)
+    private var playbackSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("播放")
+
+            VStack(spacing: 0) {
+                Menu {
+                    ForEach(PlayerPreferences.qualityOptions, id: \.self) { option in
+                        Button(option) {
+                            quality = option
+                            PlayerPreferences.quality = option
                         }
-                        .padding(.vertical, 11)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!source.isSupported)
+                } label: {
+                    pickerRow("清晰度偏好", quality)
+                }
 
-                    if index < app.sources.count - 1 {
-                        Divider().background(Theme.divider)
+                Divider().background(Color.white.opacity(0.06))
+
+                HStack {
+                    Text("弹幕默认开启")
+                        .font(Theme.font(13))
+                        .foregroundStyle(Theme.textPrimary)
+                    Spacer()
+                    Toggle("", isOn: $danmaku)
+                        .labelsHidden()
+                        .tint(Theme.accent)
+                        .onChange(of: danmaku) { _, value in
+                            PlayerPreferences.danmakuEnabled = value
+                        }
+                }
+                .padding(.vertical, 9)
+
+                Divider().background(Color.white.opacity(0.06))
+
+                Menu {
+                    ForEach(PlayerPreferences.decoderOptions, id: \.self) { option in
+                        Button(option) {
+                            decoder = option
+                            PlayerPreferences.decoder = option
+                        }
                     }
+                } label: {
+                    pickerRow("播放器解码方式", decoder)
                 }
             }
             .padding(.horizontal, 14)
-            .panel(radius: 16)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
+                    .fill(Theme.cardDeep)
+            )
         }
-    }
-
-    // MARK: - 存储
-
-    private var storageSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionTitle("数据")
-
-            VStack(spacing: 0) {
-                actionRow(icon: "photo.on.rectangle", title: "清除图片缓存") {
-                    ImagePipeline.shared.clear()
-                    Haptics.success()
-                }
-
-                Divider().background(Theme.divider)
-
-                actionRow(icon: "clock.arrow.circlepath", title: "清空观看历史") {
-                    showClearHistoryConfirm = true
-                }
-
-                Divider().background(Theme.divider)
-
-                actionRow(icon: "heart.slash", title: "清空收藏（\(library.favorites.count)）") {
-                    for video in library.favorites {
-                        library.removeFavorite(video)
-                    }
-                    Haptics.success()
-                }
-            }
-            .padding(.horizontal, 14)
-            .panel(radius: 16)
-        }
-    }
-
-    private func actionRow(icon: String, title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .frame(width: 20)
-
-                Text(title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
-            }
-            .padding(.vertical, 12)
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - 关于
@@ -209,32 +157,68 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("关于")
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("云影视")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Theme.font(13, .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
                     Text("1.0.0")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textTertiary)
+                        .font(Theme.font(11))
+                        .foregroundStyle(Theme.textFaint)
                 }
 
-                Text("本应用不提供、不内置任何影视资源。所有内容均来自使用者自行导入的第三方接口，相关内容的合法性与版权责任由使用者自行承担。")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textTertiary)
+                Text("本应用不提供、不内置任何影视资源，所有内容均来自你自行连接的媒体服务器。")
+                    .font(Theme.font(11))
+                    .foregroundStyle(Theme.textFaint)
                     .lineSpacing(3)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .panel(radius: 16)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
+                    .fill(Theme.cardDeep)
+            )
         }
     }
 
+    // MARK: - 组件
+
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Theme.textTertiary)
+            .font(Theme.font(12, .semibold))
+            .foregroundStyle(Theme.textWeak)
             .padding(.leading, 2)
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(Theme.font(13))
+                .foregroundStyle(Theme.textWeak)
+            Spacer()
+            Text(value)
+                .font(Theme.font(13))
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(1)
+        }
+        .padding(.vertical, 13)
+    }
+
+    private func pickerRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(Theme.font(13))
+                .foregroundStyle(Theme.textPrimary)
+            Spacer()
+            Text(value)
+                .font(Theme.font(13))
+                .foregroundStyle(Theme.textSecondary)
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.textFaint)
+        }
+        .padding(.vertical, 13)
+        .contentShape(Rectangle())
     }
 }

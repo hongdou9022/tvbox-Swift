@@ -1,306 +1,350 @@
 import SwiftUI
+import UIKit
 
-/// 详情页：模糊海报头图 + 信息 + 线路/选集 + 简介。
+/// 详情 / 播放页（规范第 5 章）。
 struct DetailView: View {
-    let video: Video
+    let target: MediaTarget
 
-    @EnvironmentObject private var app: AppState
-    @EnvironmentObject private var library: LibraryStore
     @Environment(\.dismiss) private var dismiss
-
     @StateObject private var vm = DetailViewModel()
-    @State private var showPlayer = false
-    @State private var synopsisExpanded = false
+    @StateObject private var player = PlayerModel()
+
+    @State private var isFullscreen = false
+    @State private var locked = false
+    @State private var showInfo = false
+    @State private var showCast = false
+    @State private var showAllEpisodes = false
+
+    private var screenWidth: CGFloat {
+        UIScreen.main.bounds.width
+    }
 
     var body: some View {
-        ZStack(alignment: .top) {
-            Theme.pageGradient.ignoresSafeArea()
+        ZStack {
+            Theme.bgDetail.ignoresSafeArea()
 
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    header
-                    actionRow
-                    if vm.hasLines { lineSection }
-                    if !vm.episodes.isEmpty { episodeSection }
-                    if let detail = vm.detail, !detail.plainContent.isEmpty { synopsisSection(detail) }
-                    Color.clear.frame(height: 40)
+                    playerBox
+                    titleRow
+                    infoRow
+                    if vm.hasMultipleSources {
+                        sourceCards
+                    }
+                    episodeSection
+                    Color.clear.frame(height: 30)
                 }
             }
 
-            topControls
+            if isFullscreen {
+                fullscreenLayer
+            }
         }
         .toolbar(.hidden, for: .navigationBar)
         .task {
-            guard let source = app.source(for: video.sourceKey) else { return }
-            await vm.load(video: video, source: source)
+            await vm.load(target: target)
         }
-        .fullScreenCover(isPresented: $showPlayer) {
-            if let episode = vm.currentEpisode {
-                PlayerView(
-                    title: video.name,
-                    subtitle: "\(vm.currentLineName) · \(episode.name)",
-                    urlString: episode.url,
-                    startAt: vm.resumeSeconds,
-                    hasNext: vm.hasNext,
-                    onClose: {
-                        showPlayer = false
-                    },
-                    onProgress: { seconds, duration in
-                        vm.persistProgress(video: video, seconds: seconds, duration: duration)
-                    },
-                    onFinished: {
-                        if !vm.playNext() {
-                            showPlayer = false
-                        }
-                    },
-                    onNext: {
-                        vm.playNext()
-                    }
-                )
-                .id(episode.id)
-            }
-        }
-    }
-
-    // MARK: - 顶部
-
-    private var topControls: some View {
-        HStack {
-            CircleIconButton(systemName: "chevron.left") {
-                dismiss()
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Theme.pagePadding)
-        .padding(.top, 4)
-    }
-
-    // MARK: - 头图
-
-    private var header: some View {
-        ZStack(alignment: .bottomLeading) {
-            // 模糊背景
-            RemoteImage(urlString: video.pic, contentMode: .fill)
-                .frame(maxWidth: .infinity)
-                .frame(height: 250)
-                .clipped()
-                .blur(radius: 26, opaque: true)
-                .overlay(Color.black.opacity(0.35))
-
-            LinearGradient(
-                colors: [Color.clear, Theme.bg.opacity(0.85), Theme.bg],
-                startPoint: .top,
-                endPoint: .bottom
+        .onChange(of: vm.playURL) { _, url in
+            guard !url.isEmpty else { return }
+            player.load(
+                urlString: url,
+                headers: vm.playHeaders,
+                startAt: 0
             )
-            .frame(height: 250)
-
-            HStack(alignment: .bottom, spacing: 14) {
-                RemoteImage(urlString: video.pic, contentMode: .fill, cornerRadius: 12)
-                    .frame(width: 104, height: 156)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.12), lineWidth: 1)
-                    )
-                    .shadow(color: .black.opacity(0.55), radius: 12, y: 6)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(vm.title.isEmpty ? video.name : vm.title)
-                        .font(.system(size: 21, weight: .bold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-
-                    if let detail = vm.detail, !detail.metaLine.isEmpty {
-                        Text(detail.metaLine)
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textSecondary)
-                            .lineLimit(1)
-                    }
-
-                    if !video.note.isEmpty {
-                        Text(video.note)
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                    }
-                }
-                .padding(.bottom, 6)
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Theme.pagePadding)
-            .padding(.bottom, 14)
         }
-        .frame(height: 250)
+        .onDisappear {
+            vm.saveProgress(position: player.currentTime, duration: player.duration)
+            player.stop()
+            isFullscreen = false
+            OrientationLock.portrait()
+        }
+        .sheet(isPresented: $showInfo) {
+            DetailInfoSheet(detail: vm.detail, fallbackTitle: target.title, fallbackPoster: target.poster)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(Theme.bgDetail)
+        }
+        .sheet(isPresented: $showCast) {
+            CastPanel()
+                .presentationDetents([.height(360), .large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(Theme.bgDetail)
+        }
+    }
+
+    // MARK: - 播放区
+
+    private var playerBox: some View {
+        PlayerStage(
+            model: player,
+            title: vm.title,
+            episodeName: vm.currentEpisode?.name ?? "",
+            qualities: vm.qualities,
+            isFullscreen: $isFullscreen,
+            locked: $locked,
+            onBack: {
+                dismiss()
+            },
+            onCast: {
+                showCast = true
+            },
+            onQuality: { variant in
+                Task { await vm.selectVariant(variant) }
+            },
+            onNext: nextAction,
+            onToggleFullscreen: {
+                enterFullscreen()
+            },
+            onProgress: { position, duration in
+                vm.saveProgress(position: position, duration: duration)
+            }
+        )
+        // 规范 5.1-1：16:9，高 = 屏宽 × 9/16
+        .frame(height: screenWidth * 9 / 16)
+    }
+
+    private var nextAction: (() -> Void)? {
+        guard vm.hasNext else { return nil }
+        return {
+            Task { await vm.playNext() }
+        }
+    }
+
+    private var fullscreenLayer: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            PlayerStage(
+                model: player,
+                title: vm.title,
+                episodeName: vm.currentEpisode?.name ?? "",
+                qualities: vm.qualities,
+                isFullscreen: .constant(true),
+                locked: $locked,
+                onBack: {
+                    exitFullscreen()
+                },
+                onCast: {
+                    showCast = true
+                },
+                onQuality: { variant in
+                    Task { await vm.selectVariant(variant) }
+                },
+                onNext: nextAction,
+                onToggleFullscreen: {
+                    exitFullscreen()
+                },
+                onProgress: { position, duration in
+                    vm.saveProgress(position: position, duration: duration)
+                }
+            )
+            .ignoresSafeArea()
+        }
+        .transition(.opacity)
+        .zIndex(10)
+    }
+
+    private func enterFullscreen() {
+        locked = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isFullscreen = true
+        }
+        OrientationLock.landscape()
+    }
+
+    /// 规范 5.6：返回键先退出全屏；退出全屏后必须回到竖屏。
+    private func exitFullscreen() {
+        locked = false
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isFullscreen = false
+        }
+        OrientationLock.portrait()
+    }
+
+    // MARK: - 标题行
+
+    private var titleRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(vm.title)
+                .font(Theme.fontTitle)
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            // 规范 5.4：未收藏白色空心，已收藏实心橙色，点击立即切换
+            Button {
+                Task { await vm.toggleFavorite() }
+            } label: {
+                Image(systemName: vm.isFavorited ? "heart.fill" : "heart")
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(vm.isFavorited ? Theme.playAccent : Theme.textPrimary)
+                    .frame(width: 38, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Theme.padPage)
+        .padding(.top, 14)
+    }
+
+    // MARK: - 信息行
+
+    private var infoRow: some View {
+        HStack(spacing: 0) {
+            // 规范 5.1-3：只有来源名是绿色，其余灰色
+            Text("源：")
+                .font(Theme.font(12))
+                .foregroundStyle(Theme.textWeak)
+
+            Text(vm.currentSourceName.isEmpty ? "未知" : vm.currentSourceName)
+                .font(Theme.font(12))
+                .foregroundStyle(Theme.accent)
+
+            Text(actorSuffix)
+                .font(Theme.font(12))
+                .foregroundStyle(Theme.textWeak)
+                .lineLimit(1)
+
+            Spacer(minLength: 8)
+
+            Button {
+                showInfo = true
+            } label: {
+                HStack(spacing: 2) {
+                    Text("详情")
+                        .font(Theme.font(12))
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundStyle(Theme.textWeak)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, Theme.padPage)
         .padding(.top, 8)
     }
 
-    // MARK: - 播放 / 收藏
-
-    private var actionRow: some View {
-        HStack(spacing: 10) {
-            Button {
-                if vm.episodes.isEmpty { return }
-                showPlayer = true
-            } label: {
-                HStack(spacing: 7) {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 13, weight: .bold))
-                    Text(playButtonTitle)
-                }
-            }
-            .buttonStyle(AccentButtonStyle(height: 46))
-            .disabled(vm.episodes.isEmpty)
-            .opacity(vm.episodes.isEmpty ? 0.45 : 1)
-
-            Button {
-                library.toggleFavorite(video)
-            } label: {
-                Image(systemName: library.isFavorite(video) ? "heart.fill" : "heart")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(library.isFavorite(video) ? Theme.danger : Theme.textSecondary)
-                    .frame(width: 52, height: 46)
-                    .background(
-                        RoundedRectangle(cornerRadius: 23, style: .continuous)
-                            .fill(Theme.panelHigh)
-                    )
-            }
-            .buttonStyle(PressScaleStyle())
-        }
-        .padding(.horizontal, Theme.pagePadding)
-        .padding(.top, 4)
+    private var actorSuffix: String {
+        guard let actors = vm.detail?.actors, !actors.isEmpty else { return "" }
+        return " | \(actors)"
     }
 
-    private var playButtonTitle: String {
-        guard let episode = vm.currentEpisode else { return "暂无片源" }
-        if vm.resumeSeconds > 30 {
-            return "继续观看 · \(episode.name)"
-        }
-        return "播放 \(episode.name)"
-    }
+    // MARK: - 多源卡片（规范 5.3）
 
-    // MARK: - 线路
+    private var sourceCards: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 9) {
+                ForEach(Array(vm.sources.enumerated()), id: \.element.id) { index, source in
+                    let selected = vm.sourceIndex == index
 
-    private var lineSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "播放线路", trailing: "\(vm.lines.count) 条")
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(Array(vm.lines.enumerated()), id: \.element.id) { index, line in
-                        Button {
-                            vm.selectLine(index)
-                        } label: {
-                            TagChip(text: line.name, selected: vm.lineIndex == index)
-                        }
-                        .buttonStyle(PressScaleStyle())
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, Theme.pagePadding)
-        .padding(.top, 22)
-    }
-
-    // MARK: - 选集
-
-    private var episodeSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "选集", trailing: "共 \(vm.episodes.count) 集")
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 62, maximum: 90), spacing: 8)],
-                spacing: 8
-            ) {
-                ForEach(Array(vm.episodes.enumerated()), id: \.element.id) { index, episode in
                     Button {
-                        vm.selectEpisode(index)
-                        showPlayer = true
+                        Task { await vm.selectSource(index) }
                     } label: {
-                        Text(episode.name)
-                            .font(.system(size: 12, weight: vm.episodeIndex == index ? .semibold : .regular))
-                            .foregroundStyle(vm.episodeIndex == index ? Color.white : Theme.textSecondary)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 36)
-                            .background {
-                                if vm.episodeIndex == index {
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(Theme.accentGradient)
-                                } else {
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(Theme.panelHigh)
-                                }
-                            }
-                    }
-                    .buttonStyle(PressScaleStyle())
-                }
-            }
-        }
-        .padding(.horizontal, Theme.pagePadding)
-        .padding(.top, 22)
-    }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(source.name)
+                                .font(Theme.font(12, selected ? .semibold : .regular))
+                                .foregroundStyle(selected ? Theme.accent : Theme.textSecondary)
+                                .lineLimit(1)
 
-    // MARK: - 简介
-
-    private func synopsisSection(_ detail: VodDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "剧情简介")
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(detail.plainContent)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineSpacing(5)
-                    .lineLimit(synopsisExpanded ? nil : 4)
-
-                if detail.plainContent.count > 80 {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            synopsisExpanded.toggle()
+                            Text("共\(source.episodes.count)集")
+                                .font(Theme.fontBadge)
+                                .foregroundStyle(selected ? Theme.accent.opacity(0.8) : Theme.textFaint)
                         }
-                    } label: {
-                        Text(synopsisExpanded ? "收起" : "展开全部")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.accent)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
+                                .fill(selected ? Theme.accent.opacity(0.12) : Theme.card)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
+                                .stroke(selected ? Theme.accent : Color.clear, lineWidth: 1)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .panel(radius: 14)
-
-            if let detail = vm.detail {
-                if !detail.director.isEmpty || !detail.actor.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if !detail.director.isEmpty {
-                            infoRow("导演", detail.director)
-                        }
-                        if !detail.actor.isEmpty {
-                            infoRow("主演", detail.actor)
-                        }
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .panel(radius: 14)
-                }
-            }
+            .padding(.horizontal, Theme.padPage)
         }
-        .padding(.horizontal, Theme.pagePadding)
-        .padding(.top, 22)
+        .padding(.top, 14)
     }
 
-    private func infoRow(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(label)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textTertiary)
-                .frame(width: 34, alignment: .leading)
+    // MARK: - 剧集（规范 5.1-5/6）
 
-            Text(value)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textSecondary)
-                .lineLimit(3)
+    private var episodeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Text("剧集列表")
+                    .font(Theme.font(15, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+
+                Text("共 \(vm.episodes.count) 集")
+                    .font(Theme.font(11))
+                    .foregroundStyle(Theme.accent)
+
+                Spacer()
+
+                if vm.episodes.count > 20 {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAllEpisodes.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 2) {
+                            Text(showAllEpisodes ? "收起" : "查看全部")
+                                .font(Theme.font(11))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 9, weight: .semibold))
+                                .rotationEffect(.degrees(showAllEpisodes ? -90 : 0))
+                        }
+                        .foregroundStyle(Theme.textWeak)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, Theme.padPage)
+
+            if vm.episodes.isEmpty {
+                ListFooterView(state: .empty)
+            } else {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4),
+                    spacing: 8
+                ) {
+                    ForEach(visibleEpisodes) { episode in
+                        let selected = episode.id == vm.currentEpisode?.id
+
+                        Button {
+                            if let index = vm.episodes.firstIndex(of: episode) {
+                                Task { await vm.selectEpisode(index) }
+                            }
+                        } label: {
+                            Text(episode.name)
+                                .font(Theme.font(12, selected ? .semibold : .regular))
+                                .foregroundStyle(selected ? .white : Theme.textSecondary)
+                                .lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 40)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Theme.radiusEpisode, style: .continuous)
+                                        .fill(selected ? Theme.playAccent : Theme.card)
+                                )
+                        }
+                        .buttonStyle(TapScaleStyle())
+                    }
+                }
+                .padding(.horizontal, Theme.padPage)
+            }
         }
+        .padding(.top, 18)
+    }
+
+    private var visibleEpisodes: [Episode] {
+        if showAllEpisodes || vm.episodes.count <= 20 {
+            return vm.episodes
+        }
+        return Array(vm.episodes.prefix(20))
     }
 }

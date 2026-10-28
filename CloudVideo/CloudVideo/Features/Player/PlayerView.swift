@@ -1,12 +1,10 @@
 import SwiftUI
 import AVFoundation
-import MediaPlayer
+import Combine
 import UIKit
 
-// MARK: - 视频渲染层
+// MARK: - 渲染层
 
-/// 用 AVPlayerLayer 而不是 `VideoPlayer`：后者自带一套系统控件，
-/// 无法和自定义手势层、自定义控制条共存。
 struct PlayerSurface: UIViewRepresentable {
     let player: AVPlayer
 
@@ -29,497 +27,482 @@ final class PlayerLayerView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
     var playerLayer: AVPlayerLayer {
-        // layerClass 已声明为 AVPlayerLayer，这里不会失败
         layer as! AVPlayerLayer
     }
 }
 
-// MARK: - 系统音量
+// MARK: - 进度条（2dp 细线 + 圆点滑块）
 
-/// `AVAudioSession.outputVolume` 是只读的，改音量必须借 MPVolumeView 内部的 UISlider。
-/// 所以需要把这个 1x1 的视图放进视图层级里，滑块才生效。
-final class VolumeBridge {
-    static weak var volumeView: MPVolumeView?
+struct PlayerProgressBar: View {
+    let progress: Double
+    var height: CGFloat = 2
+    var onScrub: (Double) -> Void
+    var onScrubEnd: (Double) -> Void
 
-    static var slider: UISlider? {
-        volumeView?.subviews.compactMap { $0 as? UISlider }.first
-    }
+    @State private var dragging = false
+    @State private var dragRatio: Double = 0
 
-    static var current: Float {
-        AVAudioSession.sharedInstance().outputVolume
-    }
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(geo.size.width, 1)
+            let ratio = dragging ? dragRatio : min(max(progress, 0), 1)
 
-    static func set(_ value: Float) {
-        let clamped = min(max(value, 0), 1)
-        DispatchQueue.main.async {
-            slider?.value = clamped
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.24))
+                    .frame(height: height)
+
+                Capsule()
+                    .fill(Theme.playAccent)
+                    .frame(width: max(0, width * ratio), height: height)
+
+                Circle()
+                    .fill(Theme.playAccent)
+                    .frame(width: 10, height: 10)
+                    .offset(x: max(0, width * ratio - 5))
+            }
+            .frame(height: 20)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        dragging = true
+                        dragRatio = min(max(Double(value.location.x / width), 0), 1)
+                        onScrub(dragRatio)
+                    }
+                    .onEnded { _ in
+                        dragging = false
+                        onScrubEnd(dragRatio)
+                    }
+            )
         }
+        .frame(height: 20)
     }
 }
 
-struct VolumeSliderView: UIViewRepresentable {
-    func makeUIView(context: Context) -> MPVolumeView {
-        // 1x1 的隐藏视图，只为了让内部的 UISlider 能真正改到系统音量
-        let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        view.alpha = 0.01
-        VolumeBridge.volumeView = view
-        return view
-    }
+// MARK: - 播放舞台
 
-    func updateUIView(_ uiView: MPVolumeView, context: Context) {
-        VolumeBridge.volumeView = uiView
-    }
-}
+/// 竖屏内联与横屏全屏共用。控件规格见规范 5.2 / 5.6。
+struct PlayerStage: View {
+    @ObservedObject var model: PlayerModel
 
-// MARK: - 播放器
-
-struct PlayerView: View {
     let title: String
-    var subtitle: String = ""
-    let urlString: String
-    var startAt: Double = 0
-    var hasNext: Bool = false
+    let episodeName: String
+    let qualities: [PlayURLVariant]
 
-    var onClose: () -> Void
-    var onProgress: (Double, Double) -> Void = { _, _ in }
-    var onFinished: () -> Void = {}
-    var onNext: () -> Void = {}
+    @Binding var isFullscreen: Bool
+    @Binding var locked: Bool
 
-    @StateObject private var model = PlayerModel()
+    var onBack: () -> Void
+    var onCast: () -> Void
+    var onQuality: (PlayURLVariant) -> Void
+    var onNext: (() -> Void)?
+    var onToggleFullscreen: () -> Void
+    var onProgress: (Double, Double) -> Void
 
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var scrubbing = false
-    @State private var scrubValue: Double = 0
-    @State private var hudText: String?
-    @State private var brightness: CGFloat = UIScreen.main.brightness
-    @State private var dragMode: DragMode = .none
-    @State private var dragStartTime: Double = 0
-    @State private var dragStartValue: CGFloat = 0
-    @State private var zoom: CGFloat = 1
-    @State private var baseZoom: CGFloat = 1
-    @State private var rateIndex = 0
+    @State private var scrubSeconds: Double = 0
+    @State private var danmakuOn = true
+    @State private var rate: Float = 1
+    @State private var now = Date()
 
-    private let rates: [Float] = [1.0, 1.25, 1.5, 2.0]
-
-    private enum DragMode {
-        case none, seek, brightness, volume
-    }
+    private let clock = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color.black.ignoresSafeArea()
+        ZStack {
+            Color.black
 
-                PlayerSurface(player: model.player)
-                    .scaleEffect(zoom)
-                    .ignoresSafeArea()
+            PlayerSurface(player: model.player)
 
-                // 隐藏但必须在层级里，否则调音量无效
-                VolumeSliderView()
-                    .frame(width: 1, height: 1)
-                    .opacity(0.01)
-
-                gestureLayer(size: geo.size)
-
-                if model.isBuffering && !model.failed {
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(1.3)
+            // 单击切控件显隐 / 双击播放暂停（规范 5.2 交互）
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    model.togglePlay()
+                    wakeControls(force: true)
+                }
+                .onTapGesture {
+                    toggleControls()
                 }
 
-                if model.failed {
-                    failureView
-                }
+            if model.isBuffering && !model.failed {
+                ProgressView()
+                    .tint(.white)
+                    .scaleEffect(1.2)
+            }
 
-                if controlsVisible && !model.failed {
-                    controls(size: geo.size)
-                        .transition(.opacity)
-                }
+            if model.failed {
+                failureView
+            }
 
-                if let hudText {
-                    hudView(hudText)
-                        .transition(.opacity)
-                }
+            if controlsVisible && !model.failed {
+                controls
+                    .transition(.opacity)
+            }
+
+            if locked {
+                lockOverlay
             }
         }
-        .statusBarHidden(true)
-        .persistentSystemOverlays(.hidden)
+        .clipped()
         .onAppear {
+            wakeControls(force: true)
             model.onEnd = {
-                // 播完先把进度落盘，再决定是否自动下一集
                 onProgress(model.currentTime, model.duration)
-                onFinished()
+                onNext?()
             }
-            model.load(urlString: urlString, startAt: startAt)
-            scheduleHide()
         }
         .onDisappear {
             onProgress(model.currentTime, model.duration)
-            model.stop()
             hideTask?.cancel()
         }
-    }
-
-    // MARK: - 手势层
-
-    private func gestureLayer(size: CGSize) -> some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .gesture(dragGesture(size: size))
-            .simultaneousGesture(tapGesture(size: size))
-            .simultaneousGesture(zoomGesture)
-    }
-
-    private func tapGesture(size: CGSize) -> some Gesture {
-        let double = SpatialTapGesture(count: 2).onEnded { value in
-            handleDoubleTap(at: value.location, size: size)
+        .onReceive(clock) { value in
+            now = value
         }
-        let single = SpatialTapGesture(count: 1).onEnded { _ in
-            toggleControls()
-        }
-        return double.exclusively(before: single)
-    }
-
-    private func dragGesture(size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 14)
-            .onChanged { value in
-                handleDrag(value, size: size)
-            }
-            .onEnded { _ in
-                endDrag()
-            }
-    }
-
-    private var zoomGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                zoom = min(max(baseZoom * value, 1), 3)
-            }
-            .onEnded { _ in
-                baseZoom = zoom
-            }
-    }
-
-    private func handleDoubleTap(at location: CGPoint, size: CGSize) {
-        if location.x < size.width / 3 {
-            seekBy(-10)
-            showHUD("后退 10 秒")
-        } else if location.x > size.width * 2 / 3 {
-            seekBy(10)
-            showHUD("前进 10 秒")
-        } else {
-            model.togglePlay()
-            showHUD(model.isPlaying ? "播放" : "暂停")
-        }
-        scheduleHide()
-    }
-
-    private func handleDrag(_ value: DragGesture.Value, size: CGSize) {
-        if dragMode == .none {
-            if abs(value.translation.width) > abs(value.translation.height) {
-                dragMode = .seek
-                dragStartTime = model.currentTime
-                scrubbing = true
-                scrubValue = model.currentTime
+        .onChange(of: model.isPlaying) { _, playing in
+            // 规范 5.2：播放中 3 秒自动隐藏控件；暂停时常驻
+            if playing {
+                scheduleHide()
             } else {
-                dragMode = value.startLocation.x < size.width / 2 ? .brightness : .volume
-                dragStartValue = dragMode == .brightness ? brightness : CGFloat(VolumeBridge.current)
+                hideTask?.cancel()
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    controlsVisible = true
+                }
             }
         }
+    }
 
-        switch dragMode {
-        case .seek:
-            let delta = Double(value.translation.width) / 6.0
-            let upper = model.duration > 0 ? model.duration : 0
-            let target = min(max(dragStartTime + delta, 0), upper)
-            scrubValue = target
-            hudText = "\(timeText(target)) / \(timeText(model.duration))"
+    // MARK: - 控件
 
-        case .brightness:
-            let next = min(max(dragStartValue - value.translation.height / 220, 0), 1)
-            brightness = next
-            UIScreen.main.brightness = next
-            hudText = "亮度 \(Int(next * 100))%"
-
-        case .volume:
-            let next = min(max(dragStartValue - value.translation.height / 220, 0), 1)
-            VolumeBridge.set(Float(next))
-            hudText = "音量 \(Int(next * 100))%"
-
-        case .none:
-            break
+    private var controls: some View {
+        VStack(spacing: 0) {
+            topBar
+            Spacer(minLength: 0)
+            if isFullscreen {
+                fullscreenBottomBar
+            } else {
+                portraitBottomBar
+            }
         }
     }
 
-    private func endDrag() {
-        if dragMode == .seek {
-            model.seek(to: scrubValue)
-            scrubbing = false
-            onProgress(model.currentTime, model.duration)
-        }
-        dragMode = .none
-        hudText = nil
-        scheduleHide()
-    }
+    private var topBar: some View {
+        HStack(spacing: 12) {
+            // 规范 5.1-2 / 5.6：返回 38dp
+            CircleIconButton(systemName: "chevron.left", size: 38) {
+                onProgress(model.currentTime, model.duration)
+                onBack()
+            }
 
-    // MARK: - 控制条
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(Theme.font(15, .bold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
 
-    private func controls(size: CGSize) -> some View {
-        VStack {
-            HStack(spacing: 12) {
-                Button {
-                    onProgress(model.currentTime, model.duration)
-                    onClose()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 34, height: 34)
-                        .background(Circle().fill(Color.white.opacity(0.14)))
-                }
-                .buttonStyle(.plain)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(.white)
+                if isFullscreen, !episodeName.isEmpty {
+                    Text(episodeName)
+                        .font(Theme.font(11))
+                        .foregroundStyle(Color.white.opacity(0.65))
                         .lineLimit(1)
-
-                    if !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(Color.white.opacity(0.6))
-                            .lineLimit(1)
-                    }
                 }
-
-                Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
 
-            Spacer()
+            Spacer(minLength: 4)
 
-            HStack(spacing: 40) {
-                Button {
-                    seekBy(-15)
-                    showHUD("后退 15 秒")
-                } label: {
-                    Image(systemName: "gobackward.15")
-                        .font(.system(size: 25))
-                        .foregroundStyle(.white)
+            if isFullscreen {
+                HStack(spacing: 3) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 11))
+                    Text(clockText)
+                        .font(Theme.font(11))
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(Color.white.opacity(0.8))
+            }
 
+            CircleIconButton(systemName: "airplayvideo", size: 32) {
+                onCast()
+            }
+
+            Menu {
+                Button("倍速 \(rateText)") { cycleRate() }
+                ForEach(qualities, id: \.url) { variant in
+                    Button(variant.name ?? "默认") { onQuality(variant) }
+                }
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, isFullscreen ? 8 : 6)
+        .padding(.bottom, 12)
+        .background(
+            LinearGradient(colors: [.black.opacity(0.65), .clear], startPoint: .top, endPoint: .bottom)
+        )
+    }
+
+    /// 规范 5.2：竖屏底部单行。
+    private var portraitBottomBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                model.togglePlay()
+                wakeControls(force: true)
+            } label: {
+                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 34, height: 34)
+            }
+            .buttonStyle(.plain)
+
+            Text(timeText(scrubbing ? scrubSeconds : model.currentTime))
+                .font(Theme.font(11))
+                .foregroundStyle(.white)
+                .frame(width: 40)
+
+            PlayerProgressBar(
+                progress: progressRatio,
+                onScrub: { ratio in
+                    scrubbing = true
+                    scrubSeconds = ratio * max(model.duration, 1)
+                },
+                onScrubEnd: { ratio in
+                    model.seek(to: ratio * max(model.duration, 1))
+                    scrubbing = false
+                    onProgress(model.currentTime, model.duration)
+                }
+            )
+
+            Text(timeText(model.duration))
+                .font(Theme.font(11))
+                .foregroundStyle(.white)
+                .frame(width: 40)
+
+            Menu {
+                ForEach(qualities, id: \.url) { variant in
+                    Button(variant.name ?? "默认") { onQuality(variant) }
+                }
+            } label: {
+                Text(qualityText)
+                    .font(Theme.font(12))
+                    .foregroundStyle(.white)
+                    .frame(minWidth: 30)
+            }
+
+            Button {
+                danmakuOn.toggle()
+            } label: {
+                Text("弹")
+                    .font(Theme.font(12))
+                    .foregroundStyle(danmakuOn ? Theme.danmakuOn : Theme.danmakuOff)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                onToggleFullscreen()
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 6)
+        .background(
+            LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom)
+        )
+    }
+
+    /// 规范 5.6：横屏底部两行。
+    private var fullscreenBottomBar: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 10) {
+                Text(timeText(scrubbing ? scrubSeconds : model.currentTime))
+                    .font(Theme.font(11))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, alignment: .leading)
+
+                PlayerProgressBar(
+                    progress: progressRatio,
+                    height: 3,
+                    onScrub: { ratio in
+                        scrubbing = true
+                        scrubSeconds = ratio * max(model.duration, 1)
+                    },
+                    onScrubEnd: { ratio in
+                        model.seek(to: ratio * max(model.duration, 1))
+                        scrubbing = false
+                        onProgress(model.currentTime, model.duration)
+                    }
+                )
+
+                Text(timeText(model.duration))
+                    .font(Theme.font(11))
+                    .foregroundStyle(.white)
+                    .frame(width: 52, alignment: .trailing)
+            }
+
+            HStack(spacing: 20) {
                 Button {
                     model.togglePlay()
-                    showHUD(model.isPlaying ? "暂停" : "播放")
-                    scheduleHide()
+                    wakeControls(force: true)
                 } label: {
                     Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 26, weight: .bold))
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(.white)
-                        .frame(width: 66, height: 66)
-                        .background(Circle().fill(Color.white.opacity(0.16)))
+                        .frame(width: 34, height: 34)
                 }
                 .buttonStyle(.plain)
 
-                Button {
-                    seekBy(15)
-                    showHUD("前进 15 秒")
-                } label: {
-                    Image(systemName: "goforward.15")
-                        .font(.system(size: 25))
+                if let onNext {
+                    Button(action: onNext) {
+                        HStack(spacing: 4) {
+                            Text("下一集")
+                                .font(Theme.font(12))
+                            Image(systemName: "forward.end.fill")
+                                .font(.system(size: 9))
+                        }
                         .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-            }
-
-            Spacer()
-
-            VStack(spacing: 10) {
-                HStack(spacing: 10) {
-                    Text(timeText(scrubbing ? scrubValue : model.currentTime))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.white)
-                        .frame(width: 54, alignment: .leading)
-
-                    Slider(
-                        value: sliderBinding,
-                        in: 0...max(model.duration, 1),
-                        onEditingChanged: handleSliderEditing
-                    )
-                    .tint(Theme.accent)
-
-                    Text(timeText(model.duration))
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(Color.white.opacity(0.7))
-                        .frame(width: 54, alignment: .trailing)
-                }
-
-                HStack(spacing: 14) {
-                    Button {
-                        cycleRate()
-                    } label: {
-                        Text(rateLabel)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(Color.white.opacity(0.14)))
                     }
                     .buttonStyle(.plain)
-
-                    Spacer()
-
-                    if hasNext {
-                        Button {
-                            onProgress(model.currentTime, model.duration)
-                            onNext()
-                        } label: {
-                            HStack(spacing: 5) {
-                                Text("下一集")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Image(systemName: "forward.end.fill")
-                                    .font(.system(size: 10))
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Capsule().fill(Color.white.opacity(0.14)))
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
+
+                Button {
+                    danmakuOn.toggle()
+                } label: {
+                    Text("弹")
+                        .font(Theme.font(12))
+                        .foregroundStyle(danmakuOn ? Theme.danmakuOn : Theme.danmakuOff)
+                }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 0)
+
+                Text("换源")
+                    .font(Theme.font(12))
+                    .foregroundStyle(.white)
+
+                Menu {
+                    ForEach(qualities, id: \.url) { variant in
+                        Button(variant.name ?? "默认") { onQuality(variant) }
+                    }
+                } label: {
+                    Text(qualityText)
+                        .font(Theme.font(12))
+                        .foregroundStyle(.white)
+                }
+
+                Button {
+                    cycleRate()
+                } label: {
+                    Text(rateText)
+                        .font(Theme.font(12))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+
+                Text("选集")
+                    .font(Theme.font(12))
+                    .foregroundStyle(.white)
             }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 26)
         }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 14)
         .background(
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.65),
-                    Color.black.opacity(0.05),
-                    Color.black.opacity(0.05),
-                    Color.black.opacity(0.75)
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
+            LinearGradient(colors: [.clear, .black.opacity(0.72)], startPoint: .top, endPoint: .bottom)
         )
     }
 
-    private var sliderBinding: Binding<Double> {
-        Binding(
-            get: { scrubbing ? scrubValue : model.currentTime },
-            set: { scrubValue = $0 }
-        )
-    }
-
-    private func handleSliderEditing(_ editing: Bool) {
-        if editing {
-            scrubbing = true
-            scrubValue = model.currentTime
-            hideTask?.cancel()
-        } else {
-            model.seek(to: scrubValue)
-            scrubbing = false
-            onProgress(model.currentTime, model.duration)
-            scheduleHide()
+    /// 规范 5.6：左侧边缘锁屏按钮。
+    private var lockOverlay: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Button {
+                    locked = false
+                    wakeControls(force: true)
+                } label: {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(.white)
+                        .frame(width: 40, height: 40)
+                        .background(Circle().fill(Color.black.opacity(0.45)))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 14)
+                Spacer()
+            }
+            Spacer()
         }
     }
 
-    private var rateLabel: String {
-        let value = rates[rateIndex]
-        return value == 1.0 ? "倍速" : String(format: "%.2gx", value)
+    private var failureView: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 26, weight: .light))
+                .foregroundStyle(Theme.playAccent)
+            Text("这个片源播不了")
+                .font(Theme.font(13, .semibold))
+                .foregroundStyle(.white)
+            Text("换一条线路或换源试试")
+                .font(Theme.font(11))
+                .foregroundStyle(Color.white.opacity(0.6))
+        }
+    }
+
+    // MARK: - 状态
+
+    private var progressRatio: Double {
+        guard model.duration > 0 else { return 0 }
+        let seconds = scrubbing ? scrubSeconds : model.currentTime
+        return min(max(seconds / model.duration, 0), 1)
+    }
+
+    private var qualityText: String {
+        qualities.first?.name ?? "自动"
+    }
+
+    private var rateText: String {
+        rate == 1 ? "倍速" : String(format: "%.2gx", rate)
+    }
+
+    private var clockText: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: now)
+    }
+
+    private func timeText(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "00:00" }
+        let total = Int(seconds)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%02d:%02d", m, s)
     }
 
     private func cycleRate() {
-        rateIndex = (rateIndex + 1) % rates.count
-        model.setRate(rates[rateIndex])
-        Haptics.tap()
-        showHUD(rateIndex == 0 ? "正常速度" : rateLabel)
+        let rates: [Float] = [1, 1.25, 1.5, 2]
+        let index = rates.firstIndex(of: rate) ?? 0
+        rate = rates[(index + 1) % rates.count]
+        model.setRate(rate)
     }
 
-    // MARK: - HUD
-
-    private func hudView(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(
-                Capsule().fill(Color.black.opacity(0.6))
-            )
-            .padding(.bottom, 90)
-            .frame(maxHeight: .infinity, alignment: .bottom)
-            .allowsHitTesting(false)
-    }
-
-    private func showHUD(_ text: String) {
-        withAnimation(.easeOut(duration: 0.15)) {
-            hudText = text
-        }
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 900_000_000)
-            withAnimation(.easeInOut(duration: 0.2)) {
-                if hudText == text { hudText = nil }
-            }
-        }
-    }
-
-    // MARK: - 失败态
-
-    private var failureView: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 34, weight: .light))
-                .foregroundStyle(Theme.gold)
-
-            Text("这个片源播不了")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
-
-            Text("可以回到详情页换一条线路再试")
-                .font(.system(size: 12))
-                .foregroundStyle(Color.white.opacity(0.55))
-
-            HStack(spacing: 12) {
-                Button {
-                    model.load(urlString: urlString, startAt: startAt)
-                } label: {
-                    Text("重试")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 9)
-                        .background(Theme.accentGradient, in: Capsule())
-                }
-                .buttonStyle(.plain)
-
-                Button {
-                    onClose()
-                } label: {
-                    Text("返回")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.75))
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 9)
-                        .background(Capsule().fill(Color.white.opacity(0.12)))
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 4)
-        }
-    }
-
-    // MARK: - 工具
+    // MARK: - 控件显隐
 
     private func toggleControls() {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        guard !locked else { return }
+        withAnimation(.easeInOut(duration: 0.18)) {
             controlsVisible.toggle()
         }
         if controlsVisible {
@@ -529,30 +512,25 @@ struct PlayerView: View {
         }
     }
 
+    private func wakeControls(force: Bool = false) {
+        if force || !controlsVisible {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                controlsVisible = true
+            }
+        }
+        scheduleHide()
+    }
+
     private func scheduleHide() {
         hideTask?.cancel()
+        guard model.isPlaying, !locked else { return }
+
         hideTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.25)) {
+            withAnimation(.easeInOut(duration: 0.22)) {
                 controlsVisible = false
             }
         }
-    }
-
-    private func seekBy(_ offset: Double) {
-        model.seek(to: model.currentTime + offset)
-    }
-
-    private func timeText(_ seconds: Double) -> String {
-        guard seconds.isFinite, seconds > 0 else { return "00:00" }
-        let total = Int(seconds)
-        let hours = total / 3600
-        let minutes = (total % 3600) / 60
-        let secs = total % 60
-        if hours > 0 {
-            return String(format: "%d:%02d:%02d", hours, minutes, secs)
-        }
-        return String(format: "%02d:%02d", minutes, secs)
     }
 }

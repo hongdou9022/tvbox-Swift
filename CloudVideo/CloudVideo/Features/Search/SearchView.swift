@@ -1,42 +1,70 @@
 import SwiftUI
-import UIKit
 
-/// 搜索页：多源并发搜索 + 历史词。
+/// 搜索 Tab。
 struct SearchView: View {
-    @EnvironmentObject private var app: AppState
+    var body: some View {
+        NavigationStack {
+            SearchScreen(initialKeyword: "", showsBackButton: false)
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .detail(let target):
+                        DetailView(target: target)
+                    case .search(let keyword):
+                        SearchScreen(initialKeyword: keyword, showsBackButton: true)
+                    }
+                }
+        }
+    }
+}
+
+/// 搜索页内容（规范第 4 章）。首页跳转时复用同一个视图。
+struct SearchScreen: View {
+    var initialKeyword: String = ""
+    var showsBackButton: Bool = false
+
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var vm = SearchViewModel()
     @FocusState private var focused: Bool
 
     private let columns = [
-        GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 12)
+        GridItem(.flexible(), spacing: Theme.padGrid),
+        GridItem(.flexible(), spacing: Theme.padGrid)
     ]
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                searchBar
-                content
-            }
-            .pageBackground()
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: Video.self) { video in
-                DetailView(video: video)
+        VStack(spacing: 0) {
+            searchHeader
+            scopeRow
+            content
+        }
+        .homeBackground()
+        .toolbar(.hidden, for: .navigationBar)
+        .task {
+            if vm.keyword.isEmpty { vm.keyword = initialKeyword }
+            await vm.prepareIfNeeded()
+            if !initialKeyword.isEmpty, vm.results.isEmpty {
+                await vm.search()
             }
         }
     }
 
-    // MARK: - 搜索框
+    // MARK: - 顶部
 
-    private var searchBar: some View {
-        HStack(spacing: 10) {
+    private var searchHeader: some View {
+        HStack(spacing: 8) {
+            if showsBackButton {
+                CircleIconButton(systemName: "chevron.left", size: 36) {
+                    dismiss()
+                }
+            }
+
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textTertiary)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.textFaint)
 
-                TextField("搜索影片、演员、导演", text: $vm.keyword)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14))
+                TextField("搜索影片名/演员/导演", text: $vm.keyword)
+                    .font(Theme.font(13))
                     .foregroundStyle(Theme.textPrimary)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -44,43 +72,76 @@ struct SearchView: View {
                     .submitLabel(.search)
                     .onSubmit {
                         focused = false
-                        Task { await vm.search(app: app) }
+                        Task { await vm.search() }
                     }
 
                 if !vm.keyword.isEmpty {
                     Button {
-                        vm.keyword = ""
-                        vm.clearResults()
+                        vm.clear()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 14))
-                            .foregroundStyle(Theme.textTertiary)
+                            .foregroundStyle(Theme.textFaint)
                     }
                     .buttonStyle(.plain)
                 }
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 42)
-            .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.white.opacity(0.06))
-            )
 
-            if focused || !vm.keyword.isEmpty {
-                Button("取消") {
+                Button {
                     focused = false
-                    vm.keyword = ""
-                    vm.clearResults()
+                    Task { await vm.search() }
+                } label: {
+                    Text("搜索")
+                        .font(Theme.font(12, .bold))
+                        .foregroundStyle(Theme.accent)
                 }
-                .font(.system(size: 14))
-                .foregroundStyle(Theme.accent)
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .buttonStyle(.plain)
             }
+            .padding(.horizontal, 14)
+            .frame(height: 36)
+            .background(Capsule(style: .continuous).fill(Theme.cardDeep))
         }
-        .padding(.horizontal, Theme.pagePadding)
+        .padding(.horizontal, Theme.padPage)
         .padding(.top, 8)
-        .padding(.bottom, 12)
-        .animation(.easeInOut(duration: 0.2), value: focused)
+        .padding(.bottom, 10)
+    }
+
+    /// 规范 4.1：搜索范围按钮，胶囊样式，点击弹出范围菜单。
+    private var scopeRow: some View {
+        HStack {
+            Menu {
+                Button {
+                    vm.scope = .all
+                } label: {
+                    Text(vm.scope == .all ? "✓ 全站" : "全站")
+                }
+
+                ForEach(vm.sources) { source in
+                    Button {
+                        vm.scope = .source(id: source.id, name: source.name)
+                    } label: {
+                        Text("\(source.name) \(source.suffix)")
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(vm.scope.title)
+                        .font(Theme.font(12))
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .foregroundStyle(Theme.accent)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Theme.accent.opacity(0.12))
+                )
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, Theme.padPage)
+        .padding(.bottom, 10)
     }
 
     // MARK: - 内容
@@ -90,150 +151,147 @@ struct SearchView: View {
         if vm.isSearching {
             VStack {
                 Spacer()
-                LoadingRow(text: "正在多个源里找…")
+                ProgressView().tint(Theme.accent)
                 Spacer()
             }
         } else if !vm.results.isEmpty {
-            resultGrid
-        } else if let message = vm.message {
-            ScrollView {
-                EmptyStateView(icon: "magnifyingglass", title: "没找到", subtitle: message)
-                    .padding(.top, 60)
+            resultList
+        } else if let status = vm.statusText {
+            VStack(spacing: 8) {
+                statusRow(status)
+                EmptyHintView(icon: "magnifyingglass", text: "换个关键词试试")
             }
         } else {
-            discoverPanel
+            hotSection
         }
     }
 
-    private var resultGrid: some View {
+    private var resultList: some View {
         ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("找到 \(vm.results.count) 个结果")
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                    .padding(.horizontal, Theme.pagePadding)
+            VStack(alignment: .leading, spacing: 10) {
+                if let status = vm.statusText {
+                    statusRow(status)
+                }
 
-                LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(vm.results) { video in
-                        NavigationLink(value: video) {
-                            PosterCard(video: video)
+                LazyVGrid(columns: columns, spacing: 10) {
+                    ForEach(vm.results) { item in
+                        NavigationLink(value: Route.media(item)) {
+                            SearchResultCard(item: item)
                         }
-                        .buttonStyle(PressScaleStyle(scale: 0.96))
+                        .buttonStyle(TapScaleStyle())
                     }
                 }
-                .padding(.horizontal, Theme.pagePadding)
+                .padding(.horizontal, Theme.padPage)
                 .padding(.bottom, 24)
             }
         }
     }
 
-    /// 空态：历史搜索词 + 可搜索源提示。
-    private var discoverPanel: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(alignment: .leading, spacing: 24) {
-                if !vm.history.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("最近搜索")
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundStyle(Theme.textPrimary)
-                            Spacer()
-                            Button("清空") {
-                                vm.clearHistory()
-                            }
-                            .font(.system(size: 12))
-                            .foregroundStyle(Theme.textTertiary)
-                        }
+    private func statusRow(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.font(11))
+            .foregroundStyle(Theme.textWeak)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.padPage)
+            .padding(.bottom, 8)
+    }
 
-                        FlowChips(items: vm.history) { text in
-                            vm.useKeyword(text, app: app)
+    // MARK: - 空态（最近热搜）
+
+    private var hotSection: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("最近热搜")
+                        .font(Theme.font(15, .bold))
+                        .foregroundStyle(Theme.accent)
+
+                    Spacer()
+
+                    if !vm.history.isEmpty {
+                        Button("清空") {
+                            vm.clearHistory()
                         }
+                        .font(Theme.font(11))
+                        .foregroundStyle(Theme.textFaint)
                     }
                 }
+                .padding(.horizontal, Theme.padPage)
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("正在搜索的源")
-                        .font(.system(size: 15, weight: .bold))
-                        .foregroundStyle(Theme.textPrimary)
+                if vm.hotWords.isEmpty {
+                    EmptyHintView(icon: "flame", text: "还没有搜索记录")
+                } else {
+                    // 规范 4.2：两列热搜词列表，带序号 1–6
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+                        ForEach(Array(vm.hotWords.prefix(6).enumerated()), id: \.offset) { index, word in
+                            Button {
+                                focused = false
+                                Task { await vm.useKeyword(word) }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Text("\(index + 1)")
+                                        .font(Theme.font(11, .bold))
+                                        .foregroundStyle(index < 3 ? Theme.accent : Theme.textFaint)
+                                        .frame(width: 14, alignment: .leading)
 
-                    Text("会在 \(app.searchableSources.count) 个源里同时搜索，结果按来源去重。")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textTertiary)
+                                    Text(word)
+                                        .font(Theme.font(13))
+                                        .foregroundStyle(Theme.textSecondary)
+                                        .lineLimit(1)
 
-                    ForEach(app.searchableSources.prefix(8)) { source in
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(Theme.accentGradient)
-                                .frame(width: 6, height: 6)
-                            Text(source.name)
-                                .font(.system(size: 13))
-                                .foregroundStyle(Theme.textSecondary)
-                            Spacer()
-                            Text(source.typeLabel)
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.textTertiary)
+                                    Spacer(minLength: 0)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .padding(.vertical, 6)
                     }
+                    .padding(.horizontal, Theme.padPage)
                 }
             }
-            .padding(.horizontal, Theme.pagePadding)
-            .padding(.bottom, 30)
+            .padding(.top, 6)
         }
     }
 }
 
-// MARK: - 自动换行的标签流
+// MARK: - 结果卡片
 
-/// 历史搜索词按行排布，比横向滚动更容易点中。
-struct FlowChips: View {
-    let items: [String]
-    let onTap: (String) -> Void
-
-    /// 按估算宽度把标签切行，避免使用 GeometryReader 带来的高度塌陷。
-    private var rows: [[String]] {
-        let maxWidth = UIScreen.main.bounds.width - Theme.pagePadding * 2
-        var result: [[String]] = []
-        var current: [String] = []
-        var usedWidth: CGFloat = 0
-
-        for item in items {
-            let width = CGFloat(item.count) * 12 + 34
-            if usedWidth + width > maxWidth && !current.isEmpty {
-                result.append(current)
-                current = [item]
-                usedWidth = width
-            } else {
-                current.append(item)
-                usedWidth += width + 8
-            }
-        }
-
-        if !current.isEmpty { result.append(current) }
-        return result
-    }
+/// 规范 4.3：左侧圆角海报，右侧影片名 / 来源名（绿色）/ 备注。
+struct SearchResultCard: View {
+    let item: MediaItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(rows.indices, id: \.self) { rowIndex in
-                HStack(spacing: 8) {
-                    ForEach(rows[rowIndex], id: \.self) { item in
-                        Button {
-                            onTap(item)
-                        } label: {
-                            Text(item)
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.textSecondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 7)
-                                .background(Capsule().fill(Theme.panelHigh))
-                        }
-                        .buttonStyle(PressScaleStyle())
-                    }
-                    Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: 9) {
+            RemoteImage(urlString: item.poster ?? "", contentMode: .fill, cornerRadius: 6)
+                .frame(width: 62, height: 88)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(Theme.font(13, .bold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(2)
+
+                Text(item.libraryName)
+                    .font(Theme.font(11))
+                    .foregroundStyle(Theme.accent)
+                    .lineLimit(1)
+
+                if let remark = item.remark, !remark.isEmpty {
+                    Text(remark)
+                        .font(Theme.font(10))
+                        .foregroundStyle(Theme.textWeak)
+                        .lineLimit(1)
                 }
+
+                Spacer(minLength: 0)
             }
+
+            Spacer(minLength: 0)
         }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.radiusCard, style: .continuous)
+                .fill(Theme.cardDeep)
+        )
     }
 }
