@@ -19,6 +19,9 @@ final class DetailViewModel: ObservableObject {
     @Published private(set) var isFavorited = false
     private var favoriteId: String?
 
+    /// 当前剧集的弹幕（按时间升序）。
+    @Published private(set) var danmakuComments: [DanmakuComment] = []
+
     private let api = APIClient.shared
     private var target: MediaTarget?
     private var loadedKey = ""
@@ -106,6 +109,21 @@ final class DetailViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
         isLoadingPlay = false
+
+        await loadDanmaku()
+    }
+
+    /// 规范 5.2：弹幕开关默认值取自设置。
+    private func loadDanmaku() async {
+        guard PlayerPreferences.danmakuEnabled else {
+            danmakuComments = []
+            return
+        }
+        danmakuComments = await DanmakuService.shared.load(
+            title: detail?.title ?? "",
+            year: detail?.year ?? "",
+            episode: currentEpisode?.name ?? ""
+        )
     }
 
     // MARK: - 选择
@@ -184,6 +202,23 @@ final class DetailViewModel: ObservableObject {
             isFavorited = previous
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - 投屏载荷
+
+    /// 规范 5.7：推送内容包含定位信息与当前进度，电视端可直接续播。
+    func castPayload(position: Double) -> CastPayload? {
+        guard let target, let detail, let episode = currentEpisode else { return nil }
+        return CastPayload(
+            sourceType: target.sourceType,
+            libraryId: target.libraryId,
+            videoId: target.videoId,
+            line: sourceIndex,
+            episode: episodeIndex,
+            episodeId: episode.playId,
+            positionMs: Int64(max(position, 0) * 1000),
+            title: detail.title
+        )
     }
 
     // MARK: - 进度上报

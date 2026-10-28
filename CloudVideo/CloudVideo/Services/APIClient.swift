@@ -218,6 +218,73 @@ final class APIClient {
         ])
     }
 
+    // MARK: - 设备（推送到电视的服务端兜底通道）
+
+    func registerDevice(deviceId: String, name: String, type: String = "phone", platform: String = "ios") async throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "deviceId": deviceId,
+            "name": name,
+            "type": type,
+            "platform": platform
+        ])
+        try await sendIgnoringPayload(
+            url: try endpoint("api/app/v1/devices/register"),
+            method: "POST",
+            body: body
+        )
+    }
+
+    func pairDevice(deviceId: String, pairToken: String, phoneId: String, phoneName: String) async throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "pairToken": pairToken,
+            "phoneId": phoneId,
+            "phoneName": phoneName
+        ])
+        try await sendIgnoringPayload(
+            url: try endpoint("api/app/v1/devices/\(deviceId)/pair"),
+            method: "POST",
+            body: body
+        )
+    }
+
+    func pushToDevice(deviceId: String, pairToken: String, phoneId: String, payload: [String: Any]) async throws {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "pairToken": pairToken,
+            "phoneId": phoneId,
+            "payload": payload
+        ])
+        try await sendIgnoringPayload(
+            url: try endpoint("api/app/v1/devices/\(deviceId)/push"),
+            method: "POST",
+            body: body
+        )
+    }
+
+    // MARK: - 直播
+
+    func iptvSources() async throws -> [IPTVSource] {
+        try await get("api/iptv/enabled")
+    }
+
+    // MARK: - 弹幕
+
+    func danmakuFiles(fileName: String) async throws -> [DanmakuFile] {
+        let body = try JSONSerialization.data(withJSONObject: ["fileName": fileName])
+        let data = try await perform(
+            url: try endpoint("api/app/v1/danmaku"),
+            method: "POST",
+            body: body,
+            authorized: true
+        )
+        guard let envelope = try? decoder.decode(APIEnvelope<[DanmakuFile]>.self, from: data) else {
+            throw APIError.decoding
+        }
+        guard envelope.success, envelope.code == 200 else {
+            throw APIError.server(envelope.message ?? "获取弹幕失败")
+        }
+        return envelope.data ?? []
+    }
+
     // MARK: - 内部
 
     private struct EmptyPayload: Decodable {}

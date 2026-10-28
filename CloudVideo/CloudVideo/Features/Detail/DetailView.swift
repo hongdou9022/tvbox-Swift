@@ -65,10 +65,20 @@ struct DetailView: View {
                 .presentationBackground(Theme.bgDetail)
         }
         .sheet(isPresented: $showCast) {
-            CastPanel()
-                .presentationDetents([.height(360), .large])
-                .presentationDragIndicator(.hidden)
-                .presentationBackground(Theme.bgDetail)
+            if let payload = vm.castPayload(position: player.currentTime) {
+                CastPanel(payload: payload)
+                    .presentationDetents([.height(420), .large])
+                    .presentationDragIndicator(.hidden)
+                    .presentationBackground(Theme.bgDetail)
+            } else {
+                // 规范 8：未开始播放就推送
+                Text("请先开始播放")
+                    .font(Theme.font(14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.bgDetail)
+                    .presentationDetents([.height(160)])
+            }
         }
     }
 
@@ -97,7 +107,8 @@ struct DetailView: View {
             },
             onProgress: { position, duration in
                 vm.saveProgress(position: position, duration: duration)
-            }
+            },
+            danmaku: vm.danmakuComments
         )
         // 规范 5.1-1：16:9，高 = 屏宽 × 9/16
         .frame(height: screenWidth * 9 / 16)
@@ -136,7 +147,8 @@ struct DetailView: View {
                 },
                 onProgress: { position, duration in
                     vm.saveProgress(position: position, duration: duration)
-                }
+                },
+                danmaku: vm.danmakuComments
             )
             .ignoresSafeArea()
         }

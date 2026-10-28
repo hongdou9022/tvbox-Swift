@@ -243,3 +243,48 @@ struct FavoriteListPage: Decodable {
     let list: [FavoriteRecord]
     let total: Int?
 }
+
+// MARK: - 直播（IPTV）
+
+/// 后端 `models.IPTV`：`url` 与 `content` 二选一，`content` 是内嵌的 m3u/txt 文本。
+struct IPTVSource: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let url: String?
+    let content: String?
+    let type: String?
+    let isActive: Int?
+    let isDefault: Int?
+    let header: [String: String]?
+
+    /// 频道解析优先用内嵌内容，避免多一次网络请求。
+    var inlineContent: String? {
+        guard let content, !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return content
+    }
+
+    var remoteURL: String? {
+        guard let url, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        return url
+    }
+}
+
+// MARK: - 弹幕
+
+struct DanmakuFile: Decodable, Hashable {
+    let name: String?
+    let url: String
+}
+
+/// 一条弹幕。`time` 为秒，`mode` 参考 B 站：1-3 滚动、4 底部、5 顶部。
+struct DanmakuComment: Identifiable, Hashable {
+    let id: String
+    let time: Double
+    let text: String
+    let color: UInt32
+    let mode: Int
+}

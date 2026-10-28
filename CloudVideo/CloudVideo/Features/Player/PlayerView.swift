@@ -100,11 +100,14 @@ struct PlayerStage: View {
     var onToggleFullscreen: () -> Void
     var onProgress: (Double, Double) -> Void
 
+    /// 弹幕列表，按时间升序。
+    var danmaku: [DanmakuComment] = []
+
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var scrubbing = false
     @State private var scrubSeconds: Double = 0
-    @State private var danmakuOn = true
+    @State private var danmakuOn = PlayerPreferences.danmakuEnabled
     @State private var rate: Float = 1
     @State private var now = Date()
 
@@ -115,6 +118,9 @@ struct PlayerStage: View {
             Color.black
 
             PlayerSurface(player: model.player)
+
+            // 弹幕层压在画面上、控件之下
+            DanmakuOverlay(model: model, comments: danmaku, enabled: danmakuOn)
 
             // 单击切控件显隐 / 双击播放暂停（规范 5.2 交互）
             Color.clear
