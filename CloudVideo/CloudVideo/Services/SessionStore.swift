@@ -97,10 +97,10 @@ final class SessionStore: ObservableObject {
         defaults.set(account, forKey: Keys.username)
         defaults.set(rememberPassword, forKey: Keys.remember)
 
-        Keychain.set(token, forKey: Keys.token)
+        Keychain.set(token, for: Keys.token)
 
         if rememberPassword {
-            Keychain.set(password, forKey: Keys.password)
+            Keychain.set(password, for: Keys.password)
         } else {
             Keychain.remove(Keys.password)
         }
