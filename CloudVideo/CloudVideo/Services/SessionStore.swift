@@ -26,9 +26,17 @@ final class SessionStore: ObservableObject {
         static let remember = "cloudvideo.session.remember"
         static let token = "cloudvideo.session.token"
         static let password = "cloudvideo.session.password"
+        static let serverName = "cloudvideo.session.serverName"
     }
 
     private init() {}
+
+    /// 服务端名称。登录接口目前不返回名称，
+    /// 按规范 1（v1.3）兜底取应用名，不得出现旧名。
+    var serverDisplayName: String {
+        let saved = defaults.string(forKey: Keys.serverName) ?? ""
+        return saved.isEmpty ? AppInfo.displayName : saved
+    }
 
     // MARK: - 启动恢复
 

@@ -43,10 +43,11 @@ struct LoginView: View {
             }
             .padding(.bottom, 8)
 
-            Text("OmniBox")
-                .font(Theme.font(28, .bold))
+            // 规范 1（v1.3）：标题取应用名，不硬编码；26sp 粗体，字距 0.08em
+            Text(AppInfo.displayName)
+                .font(Theme.font(26, .bold))
                 .foregroundStyle(Theme.textPrimary)
-                .tracking(1)
+                .tracking(26 * 0.08)
 
             Text("连接你的媒体服务器")
                 .font(Theme.font(13))

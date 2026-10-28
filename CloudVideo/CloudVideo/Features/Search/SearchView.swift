@@ -105,19 +105,20 @@ struct SearchScreen: View {
         .padding(.bottom, 10)
     }
 
-    /// 规范 4.1：搜索范围按钮，胶囊样式，点击弹出范围菜单。
+    /// 规范 4.1（v1.1）：搜索范围按钮独占一行，30dp 高，
+    /// 右侧同行给一条 11sp 灰色速度提示。
     private var scopeRow: some View {
-        HStack {
+        HStack(spacing: 10) {
             Menu {
                 Button {
-                    vm.scope = .all
+                    Task { await vm.applyScope(.all) }
                 } label: {
                     Text(vm.scope == .all ? "✓ 全站" : "全站")
                 }
 
                 ForEach(vm.sources) { source in
                     Button {
-                        vm.scope = .source(id: source.id, name: source.name)
+                        Task { await vm.applyScope(.source(id: source.id, name: source.name)) }
                     } label: {
                         Text("\(source.name) \(source.suffix)")
                     }
@@ -131,17 +132,29 @@ struct SearchScreen: View {
                 }
                 .foregroundStyle(Theme.accent)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .frame(height: 30)
                 .background(
                     Capsule(style: .continuous)
                         .fill(Theme.accent.opacity(0.12))
                 )
             }
 
-            Spacer()
+            Text(scopeHint)
+                .font(Theme.font(11))
+                .foregroundStyle(Theme.textFaint)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, Theme.padPage)
         .padding(.bottom, 10)
+    }
+
+    private var scopeHint: String {
+        switch vm.scope {
+        case .all: return "全站搜索会同时查询所有来源，较慢"
+        case .source: return "仅搜索该来源，更快"
+        }
     }
 
     // MARK: - 内容

@@ -23,7 +23,7 @@ enum APIError: LocalizedError {
     }
 }
 
-/// 对接 OmniBox 后端 `internal/routes/app.go` 定义的第一方客户端接口。
+/// 对接后端 `internal/routes/app.go` 定义的第一方客户端接口。
 ///
 /// 统一约定：
 /// - 除登录外全部需要 `Authorization: Bearer <token>`

@@ -1,62 +1,116 @@
 import Foundation
 
-/// 搜索结果排序（规范 4.4）。
+/// 搜索结果排序，严格对齐规范 4.4（v1.2 补充了伪代码与验收样例）。
 ///
-/// 后端已经做过一次排序，但规范要求客户端在结果到达后统一重排，
-/// 避免「谁先回来谁在前」把完全匹配挤到后面。
+/// 总顺序：匹配度 → 源优先级 → 来源名 → 片名。
+/// 后两级只用于同分时稳定排序，保证每次刷新顺序一致、同源结果聚在一起。
 enum SearchRanker {
 
-    /// 匹配度分级，数值越小越靠前。
-    private enum MatchLevel: Int {
-        case exact = 0
-        case prefix = 1
-        case contains = 2
-        case token = 3
-        case other = 4
+    // MARK: - 4.4.2 归一化
+
+    /// 规范里明确列出的、需要剔除的分隔符与括号。
+    /// 注意：只去掉括号本身，括号里的内容保留。
+    private static let normalizeSeparators: Set<Character> = [
+        "·", ":", "：", ",", "，", ".", "。", "!", "！", "?", "？",
+        "-", "—", "_", "/", "|",
+        "(", ")", "（", "）", "[", "]", "【", "】"
+    ]
+
+    /// 4.4.3 分词用的分隔符。规范里这一组**不含括号**。
+    private static let tokenSeparators: Set<Character> = [
+        "·", ":", "：", ",", "，", ".", "。", "!", "！", "?", "？",
+        "-", "—", "_", "/", "|"
+    ]
+
+    static func normalize(_ text: String?) -> String {
+        guard let text else { return "" }
+        let lowered = text.lowercased()
+        return String(lowered.filter { char in
+            !char.isWhitespace && !normalizeSeparators.contains(char)
+        })
     }
 
-    static func rank(_ items: [MediaItem], keyword: String, priority: [String: Int]) -> [MediaItem] {
-        let normalizedKeyword = normalize(keyword)
-        let tokens = keyword
-            .split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
-            .map { normalize(String($0)) }
-            .filter { !$0.isEmpty }
+    /// 按空白与标点拆分**原始**关键词。
+    private static func tokens(of keyword: String) -> [String] {
+        keyword
+            .split(whereSeparator: { char in
+                char.isWhitespace || tokenSeparators.contains(char)
+            })
+            .map(String.init)
+    }
 
-        let scored = items.enumerated().map { index, item -> (MediaItem, MatchLevel, Int, Int) in
-            let title = normalize(item.title)
-            let level = matchLevel(title: title, keyword: normalizedKeyword, tokens: tokens)
-            let sourcePriority = priority[item.libraryId] ?? Int.max
-            return (item, level, sourcePriority, index)
+    // MARK: - 4.4.3 匹配度
+
+    /// rank 越小越靠前；4 表示不相关，但**不丢弃**，只排到最后。
+    static func matchRank(keyword: String, title: String) -> Int {
+        let q = normalize(keyword)
+        let n = normalize(title)
+        guard !q.isEmpty, !n.isEmpty else { return 4 }
+
+        if n == q { return 0 }
+        if n.hasPrefix(q) { return 1 }
+        if n.contains(q) { return 2 }
+
+        // 分词用的是原始关键词拆分，每个词再各自归一化后比较，
+        // 所以「凡人 修仙传」能命中「凡人修仙传」。
+        for token in tokens(of: keyword) {
+            let normalized = normalize(token)
+            // 单字词不参与，避免「的」「之」造成大量误命中
+            if normalized.count >= 2, n.contains(normalized) {
+                return 3
+            }
+        }
+
+        return 4
+    }
+
+    // MARK: - 4.4.6 粗过滤
+
+    /// 比 rank 宽松：`q.contains(n)` 也算命中（搜「凡人修仙传 年番」能返回「凡人修仙传」）。
+    static func matchesKeyword(keyword: String, title: String) -> Bool {
+        let q = normalize(keyword)
+        let n = normalize(title)
+
+        // 太短无法判定，放行
+        if q.count < 2 || n.count < 2 { return true }
+
+        if n.contains(q) || q.contains(n) { return true }
+
+        for token in tokens(of: keyword) {
+            let normalized = normalize(token)
+            if normalized.count >= 2, n.contains(normalized) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // MARK: - 4.4.5 排序
+
+    /// - Parameter priority: `sourceId -> 权重`，规范 4.4.4：`totalCount - index`，越大越靠前。
+    static func rank(_ items: [MediaItem], keyword: String, priority: [String: Int]) -> [MediaItem] {
+        let scored = items.compactMap { item -> (item: MediaItem, rank: Int)? in
+            guard !item.title.isEmpty else { return nil }
+            guard matchesKeyword(keyword: keyword, title: item.title) else { return nil }
+            return (item, matchRank(keyword: keyword, title: item.title))
         }
 
         return scored.sorted { lhs, rhs in
-            if lhs.1.rawValue != rhs.1.rawValue { return lhs.1.rawValue < rhs.1.rawValue }
-            if lhs.2 != rhs.2 { return lhs.2 < rhs.2 }
-            return lhs.3 < rhs.3
-        }.map { $0.0 }
-    }
+            // 1) 匹配度升序
+            if lhs.rank != rhs.rank { return lhs.rank < rhs.rank }
 
-    private static func matchLevel(title: String, keyword: String, tokens: [String]) -> MatchLevel {
-        guard !keyword.isEmpty else { return .other }
+            // 2) 源优先级降序
+            let lp = priority[lhs.item.libraryId] ?? 0
+            let rp = priority[rhs.item.libraryId] ?? 0
+            if lp != rp { return lp > rp }
 
-        if title == keyword { return .exact }
-        if title.hasPrefix(keyword) { return .prefix }
-        if title.contains(keyword) { return .contains }
-        if !tokens.isEmpty, tokens.contains(where: { title.contains($0) }) { return .token }
-        return .other
-    }
+            // 3) 来源名升序
+            if lhs.item.libraryName != rhs.item.libraryName {
+                return lhs.item.libraryName < rhs.item.libraryName
+            }
 
-    /// 去标点、去空格、全角转半角后统一小写。
-    static func normalize(_ text: String) -> String {
-        let folded = text.folding(
-            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-            locale: Locale(identifier: "zh_CN")
-        )
-        let scalars = folded.unicodeScalars.filter { scalar in
-            !CharacterSet.whitespacesAndNewlines.contains(scalar)
-                && !CharacterSet.punctuationCharacters.contains(scalar)
-                && !CharacterSet.symbols.contains(scalar)
-        }
-        return String(String.UnicodeScalarView(scalars)).lowercased()
+            // 4) 片名升序（最终稳定键）
+            return lhs.item.title < rhs.item.title
+        }.map { $0.item }
     }
 }

@@ -29,10 +29,12 @@ final class SearchViewModel: ObservableObject {
 
     private let api = APIClient.shared
     private let historyKey = "cloudvideo.search.history"
+    private static let scopeKey = "cloudvideo.search.scope"
     private var didPrepare = false
 
     init() {
         history = UserDefaults.standard.stringArray(forKey: historyKey) ?? []
+        restoreScope()
     }
 
     // MARK: - 准备
@@ -89,8 +91,10 @@ final class SearchViewModel: ObservableObject {
         do {
             let page = try await api.search(keyword: trimmed, page: 1, sourceId: sourceId)
 
+            // 规范 4.4.4：越靠前优先级越高，取值 totalCount - index，排序时降序
+            let total = sources.count
             let priority = Dictionary(
-                uniqueKeysWithValues: sources.enumerated().map { ($1.id, $0) }
+                uniqueKeysWithValues: sources.enumerated().map { ($1.id, total - $0) }
             )
             results = SearchRanker.rank(page.items, keyword: trimmed, priority: priority)
 
@@ -98,13 +102,41 @@ final class SearchViewModel: ObservableObject {
             if results.isEmpty {
                 statusText = "没有找到「\(trimmed)」"
             } else {
-                statusText = "已返回 \(returnedSources) 个来源（查询 \(sources.count) 个站点）"
+                // 规范 8：已返回 N 个来源（查询 X 个站点）
+                let queried = sourceId == nil ? sources.count : 1
+                statusText = "已返回 \(returnedSources) 个来源（查询 \(queried) 个站点）"
             }
         } catch {
             statusText = error.localizedDescription
         }
 
         isSearching = false
+    }
+
+    /// 规范 4.1：选择范围后写入本地配置，并立即用当前关键词重搜。
+    func applyScope(_ newScope: Scope) async {
+        guard newScope != scope else { return }
+        scope = newScope
+        persistScope(newScope)
+
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await search()
+    }
+
+    private func persistScope(_ scope: Scope) {
+        switch scope {
+        case .all:
+            UserDefaults.standard.removeObject(forKey: Self.scopeKey)
+        case .source(let id, let name):
+            UserDefaults.standard.set([id, name], forKey: Self.scopeKey)
+        }
+    }
+
+    private func restoreScope() {
+        guard let saved = UserDefaults.standard.stringArray(forKey: Self.scopeKey),
+              saved.count == 2 else { return }
+        scope = .source(id: saved[0], name: saved[1])
     }
 
     func useKeyword(_ text: String) async {

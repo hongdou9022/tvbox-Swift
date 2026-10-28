@@ -70,6 +70,8 @@ struct SettingsView: View {
             sectionTitle("服务器")
 
             VStack(spacing: 0) {
+                infoRow("名称", session.serverDisplayName)
+                Divider().background(Color.white.opacity(0.06))
                 infoRow("地址", session.serverAddress)
                 Divider().background(Color.white.opacity(0.06))
                 infoRow("账号", session.user?.username ?? "—")
@@ -159,11 +161,11 @@ struct SettingsView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("云影视")
+                    Text(AppInfo.displayName)
                         .font(Theme.font(13, .semibold))
                         .foregroundStyle(Theme.textPrimary)
                     Spacer()
-                    Text("1.0.0")
+                    Text(AppInfo.version)
                         .font(Theme.font(11))
                         .foregroundStyle(Theme.textFaint)
                 }

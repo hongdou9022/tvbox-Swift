@@ -18,6 +18,8 @@ final class DetailViewModel: ObservableObject {
 
     @Published private(set) var isFavorited = false
     private var favoriteId: String?
+    /// 收藏写请求在途时，后台刷新的状态不得覆盖乐观更新（规范 5.4）。
+    private var favoriteMutationInFlight = false
 
     /// 当前剧集的弹幕（按时间升序）。
     @Published private(set) var danmakuComments: [DanmakuComment] = []
@@ -166,6 +168,8 @@ final class DetailViewModel: ObservableObject {
 
     private func refreshFavorite() async {
         guard let target else { return }
+        // 有写请求在途时直接放弃本次刷新，避免把用户刚点的结果刷回去
+        guard !favoriteMutationInFlight else { return }
         guard let status = try? await api.favoriteStatus(
             vodId: target.videoId,
             sourceId: target.libraryId
@@ -179,7 +183,9 @@ final class DetailViewModel: ObservableObject {
         guard let target, let detail else { return }
 
         let previous = isFavorited
+        // 规范 5.4：点击瞬间先翻图标，再后台提交，失败回滚
         isFavorited.toggle()
+        favoriteMutationInFlight = true
 
         do {
             if previous {
@@ -196,12 +202,17 @@ final class DetailViewModel: ObservableObject {
                     remark: detail.remark ?? "",
                     rating: Double(detail.score ?? "") ?? 0
                 )
+                // 需要拿回收藏记录 id，后续取消收藏要用；
+                // 先释放标记，否则 refreshFavorite 会被自己的保护挡掉
+                favoriteMutationInFlight = false
                 await refreshFavorite()
             }
         } catch {
             isFavorited = previous
             errorMessage = error.localizedDescription
         }
+
+        favoriteMutationInFlight = false
     }
 
     // MARK: - 投屏载荷
