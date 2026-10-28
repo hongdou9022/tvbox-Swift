@@ -90,7 +90,7 @@ final class DetailViewModel: ObservableObject {
     }
 
     func loadPlayInfo() async {
-        guard let target, let episode = currentEpisode else { return }
+        guard let target, currentEpisode != nil else { return }
 
         isLoadingPlay = true
         do {
