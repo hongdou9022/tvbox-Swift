@@ -300,20 +300,21 @@ final class CastService: ObservableObject {
 
     /// 规范 5.7：已配对直接推；未配对先配对（电视上确认）再推。
     func push(_ payload: CastPayload, to device: CastDevice) async throws -> String {
-        let token: String
+        // 注意不要用 token 命名局部变量，会遮蔽下面的 token(for:) 方法
+        let pairToken: String
         if let existing = token(for: device.deviceId) {
-            token = existing
+            pairToken = existing
         } else {
-            token = try await pair(device)
+            pairToken = try await pair(device)
         }
 
         do {
-            try await sendPush(payload, to: device, token: token)
+            try await sendPush(payload, to: device, token: pairToken)
             remember(device)
             return "已推送到电视"
         } catch {
             // 局域网不可达 → 回落服务端单槽
-            try await pushViaServer(payload, to: device, token: token)
+            try await pushViaServer(payload, to: device, token: pairToken)
             remember(device)
             return "已发送到服务器，电视下次前台时收取"
         }
