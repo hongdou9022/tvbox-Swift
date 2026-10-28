@@ -59,8 +59,8 @@ final class VolumeBridge {
 
 struct VolumeSliderView: UIViewRepresentable {
     func makeUIView(context: Context) -> MPVolumeView {
+        // 1x1 的隐藏视图，只为了让内部的 UISlider 能真正改到系统音量
         let view = MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
-        view.showsRouteButton = false
         view.alpha = 0.01
         VolumeBridge.volumeView = view
         return view
