@@ -1,0 +1,71 @@
+name: CloudVideo Build
+
+on:
+  push:
+    branches: [main, cloudvideo]
+    paths:
+      - 'CloudVideo/**'
+      - '.github/workflows/cloudvideo-build.yml'
+  pull_request:
+    paths:
+      - 'CloudVideo/**'
+  workflow_dispatch:
+
+concurrency:
+  group: cloudvideo-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Compile for iOS Simulator
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: CloudVideo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project CloudVideo.xcodeproj \
+            -scheme CloudVideo \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build.log
+
+      # 失败时把真正的错误行摘出来，省得在几千行日志里翻
+      - name: Collect compiler errors
+        if: failure()
+        run: |
+          echo "===== error ====="
+          grep -nE "error:" build.log | sed 's|.*/CloudVideo/||' | head -80 || true
+          echo "===== note ====="
+          grep -nE "note: " build.log | sed 's|.*/CloudVideo/||' | head -30 || true
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudvideo-build-log
+          path: CloudVideo/build.log
+          retention-days: 7

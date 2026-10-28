@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>云影视 · iOS 界面预览</title>
+<style>
+  :root{
+    --bg:#06070B; --bg2:#0B0F1A; --panel:#141826; --panel-hi:#1D2334;
+    --text:#fff; --text2:rgba(255,255,255,.62); --text3:rgba(255,255,255,.36);
+    --accent:#4C8DFF; --accent2:#9B6BFF; --gold:#F7C25C; --danger:#FF5D67;
+    --grad:linear-gradient(135deg,#4C8DFF,#9B6BFF);
+    --r-card:12px; --r-panel:20px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    margin:0;background:radial-gradient(1200px 800px at 20% 0%,#121a2e 0%,#07080d 55%,#040508 100%);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;align-items:center;justify-content:center;min-height:100vh;
+    color:#fff;overflow:hidden;
+  }
+
+  /* ---------- 手机外框 ---------- */
+  .stage{position:relative;display:flex;align-items:center;gap:56px;}
+  .phone{
+    position:relative;width:390px;height:844px;border-radius:52px;
+    background:#0a0a0c;padding:10px;
+    box-shadow:0 0 0 2px #23252c, 0 40px 90px rgba(0,0,0,.75), 0 0 120px rgba(76,141,255,.12);
+    transform-origin:center center;
+  }
+  .screen-wrap{
+    position:relative;width:100%;height:100%;border-radius:44px;overflow:hidden;background:var(--bg);
+  }
+  .notch{
+    position:absolute;top:10px;left:50%;transform:translateX(-50%);
+    width:112px;height:30px;background:#0a0a0c;border-radius:16px;z-index:60;
+  }
+
+  /* ---------- 状态栏 ---------- */
+  .statusbar{
+    height:52px;display:flex;align-items:flex-end;justify-content:space-between;
+    padding:0 26px 6px;font-size:13px;font-weight:600;letter-spacing:.2px;position:relative;z-index:50;
+  }
+  .statusbar .icons{display:flex;align-items:center;gap:5px;}
+  .bars{display:flex;align-items:flex-end;gap:2px;height:10px;}
+  .bars i{display:block;width:3px;background:#fff;border-radius:1px;}
+  .bars i:nth-child(1){height:4px}.bars i:nth-child(2){height:6px}
+  .bars i:nth-child(3){height:8px}.bars i:nth-child(4){height:10px}
+  .battery{width:22px;height:11px;border:1.4px solid rgba(255,255,255,.55);border-radius:3px;position:relative;}
+  .battery::after{content:"";position:absolute;right:-3px;top:3px;width:2px;height:5px;background:rgba(255,255,255,.55);border-radius:0 1px 1px 0;}
+  .battery i{position:absolute;inset:1.5px;width:70%;background:#fff;border-radius:1px;display:block;}
+
+  /* ---------- 通用 ---------- */
+  .screen{position:absolute;inset:0;display:none;flex-direction:column;background:linear-gradient(180deg,#0B0F1A,#05060A);}
+  .screen.active{display:flex;}
+  .scroll{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;}
+  .scroll::-webkit-scrollbar{display:none;}
+  .pad{padding:0 16px;}
+
+  .poster{
+    position:relative;border-radius:var(--r-card);overflow:hidden;
+    aspect-ratio:2/3;box-shadow:0 8px 18px rgba(0,0,0,.5);
+    border:1px solid rgba(255,255,255,.06);
+  }
+  .poster .art{position:absolute;inset:0;}
+  .poster .art::after{
+    content:"";position:absolute;inset:0;
+    background:radial-gradient(120% 80% at 30% 15%,rgba(255,255,255,.22),transparent 60%);
+  }
+  .poster .note{
+    position:absolute;left:6px;bottom:6px;font-size:10px;font-weight:600;
+    padding:3px 6px;border-radius:5px;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);
+  }
+  .poster .scrim{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.78),transparent 55%);}
+  .poster .glyph{
+    position:absolute;left:0;right:0;top:38%;text-align:center;
+    font-size:26px;font-weight:800;color:rgba(255,255,255,.14);letter-spacing:2px;
+  }
+
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .item .name{font-size:13px;font-weight:500;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .item .meta{font-size:10px;color:var(--text3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  .chip{
+    padding:8px 14px;border-radius:999px;font-size:13px;color:var(--text2);
+    background:var(--panel-hi);white-space:nowrap;
+  }
+  .chip.on{background:var(--grad);color:#fff;font-weight:600;}
+
+  .hrow{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;}
+  .hrow .t{font-size:17px;font-weight:700;}
+  .hrow .s{font-size:12px;color:var(--text3);}
+
+  /* ---------- 顶栏 ---------- */
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:6px 16px 10px;}
+  .source{display:flex;align-items:center;gap:7px;font-size:16px;font-weight:700;}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--grad);}
+  .caret{font-size:9px;color:var(--text3);}
+  .iconbtn{
+    width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.08);
+    display:flex;align-items:center;justify-content:center;font-size:15px;color:#fff;
+  }
+
+  /* ---------- 首页 ---------- */
+  .hero{
+    position:relative;height:168px;border-radius:18px;overflow:hidden;
+    border:1px solid rgba(255,255,255,.08);
+  }
+  .hero .blur{position:absolute;inset:-30px;filter:blur(26px) saturate(1.2);opacity:.85;}
+  .hero .veil{position:absolute;inset:0;background:linear-gradient(0deg,rgba(0,0,0,.9),rgba(0,0,0,.25) 60%,rgba(0,0,0,.1));}
+  .hero .body{position:absolute;left:14px;right:14px;bottom:14px;display:flex;gap:12px;align-items:flex-end;}
+  .hero .p{width:76px;height:114px;border-radius:10px;overflow:hidden;flex:none;box-shadow:0 8px 20px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.14);}
+  .hero .info{flex:1;min-width:0;}
+  .hero .title{font-size:18px;font-weight:800;line-height:1.2;}
+  .hero .sub{font-size:11px;color:var(--gold);font-weight:600;margin-top:5px;}
+  .hero .m{font-size:11px;color:rgba(255,255,255,.6);margin-top:3px;}
+  .playbtn{
+    display:inline-flex;align-items:center;gap:6px;margin-top:8px;
+    padding:6px 12px;border-radius:999px;background:var(--grad);
+    font-size:11px;font-weight:700;
+  }
+  .dots{display:flex;justify-content:center;gap:5px;margin-top:10px;}
+  .dots i{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);}
+  .dots i.on{background:#fff;width:14px;border-radius:3px;}
+
+  .cats{display:flex;gap:8px;overflow-x:auto;padding:12px 16px;scrollbar-width:none;
+    position:sticky;top:0;z-index:20;background:rgba(6,7,11,.94);backdrop-filter:blur(12px);}
+  .cats::-webkit-scrollbar{display:none;}
+
+  /* ---------- 详情 ---------- */
+  .dhead{position:relative;height:250px;flex:none;}
+  .dhead .blur{position:absolute;inset:0;filter:blur(28px) saturate(1.2);opacity:.55;}
+  .dhead .fade{position:absolute;inset:0;background:linear-gradient(180deg,transparent 0%,rgba(6,7,11,.75) 62%,#06070B 100%);}
+  .dhead .body{position:absolute;left:16px;right:16px;bottom:14px;display:flex;gap:14px;align-items:flex-end;}
+  .dhead .p{width:104px;height:156px;border-radius:12px;overflow:hidden;flex:none;
+    box-shadow:0 12px 28px rgba(0,0,0,.6);border:1px solid rgba(255,255,255,.12);}
+  .dhead .title{font-size:21px;font-weight:800;line-height:1.2;}
+  .dhead .meta{font-size:12px;color:var(--text2);margin-top:7px;}
+  .dhead .note{font-size:11px;color:var(--gold);font-weight:600;margin-top:5px;}
+
+  .actions{display:flex;gap:10px;padding:4px 16px 0;}
+  .btn-main{
+    flex:1;height:46px;border-radius:999px;background:var(--grad);
+    display:flex;align-items:center;justify-content:center;gap:7px;
+    font-size:15px;font-weight:600;
+  }
+  .btn-fav{
+    width:52px;height:46px;border-radius:23px;background:var(--panel-hi);
+    display:flex;align-items:center;justify-content:center;font-size:17px;color:var(--text2);
+  }
+  .btn-fav.on{color:var(--danger);}
+
+  .sect{padding:22px 16px 0;}
+  .epgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  .ep{
+    height:36px;border-radius:9px;background:var(--panel-hi);
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:var(--text2);
+  }
+  .ep.on{background:var(--grad);color:#fff;font-weight:600;}
+
+  .panelbox{background:var(--panel);border:1px solid rgba(255,255,255,.06);border-radius:14px;padding:14px;}
+  .desc{font-size:13px;color:var(--text2);line-height:1.7;}
+  .more{font-size:12px;color:var(--accent);font-weight:600;margin-top:8px;}
+
+  /* ---------- 播放器 ---------- */
+  #s-player{background:#000;}
+  .vwrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .vframe{
+    width:100%;aspect-ratio:16/9;position:relative;overflow:hidden;
+    background:linear-gradient(135deg,#0d1424,#1b2438 45%,#0a0f1a);
+  }
+  .vframe .glow{position:absolute;width:420px;height:420px;border-radius:50%;
+    background:radial-gradient(circle,rgba(76,141,255,.28),transparent 65%);left:-80px;top:-120px;}
+  .vframe .glow2{position:absolute;width:360px;height:360px;border-radius:50%;
+    background:radial-gradient(circle,rgba(155,107,255,.22),transparent 65%);right:-90px;bottom:-140px;}
+  .vframe .label{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+    font-size:10px;color:rgba(255,255,255,.18);letter-spacing:3px;}
+
+  .p-top{position:absolute;top:0;left:0;right:0;padding:22px 16px 20px;display:flex;align-items:center;gap:12px;
+    background:linear-gradient(180deg,rgba(0,0,0,.75),transparent);z-index:5;}
+  .p-close{width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.14);
+    display:flex;align-items:center;justify-content:center;font-size:14px;}
+  .p-title{font-size:14px;font-weight:600;}
+  .p-sub{font-size:11px;color:rgba(255,255,255,.6);margin-top:2px;}
+
+  .p-center{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);
+    display:flex;align-items:center;justify-content:center;gap:40px;z-index:5;}
+  .p-side{font-size:25px;color:#fff;opacity:.9;}
+  .p-play{width:66px;height:66px;border-radius:50%;background:rgba(255,255,255,.16);
+    display:flex;align-items:center;justify-content:center;font-size:24px;}
+
+  .p-bottom{position:absolute;left:0;right:0;bottom:0;padding:0 16px 26px;z-index:5;
+    background:linear-gradient(0deg,rgba(0,0,0,.8),transparent);}
+  .p-progress{display:flex;align-items:center;gap:10px;}
+  .p-time{font-size:11px;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.85);width:46px;}
+  .p-time.r{text-align:right;color:rgba(255,255,255,.6);}
+  .track{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.22);position:relative;}
+  .track i{position:absolute;left:0;top:0;bottom:0;width:38%;border-radius:2px;background:var(--grad);}
+  .track b{position:absolute;left:38%;top:50%;width:11px;height:11px;border-radius:50%;background:#fff;transform:translate(-50%,-50%);}
+  .p-tools{display:flex;align-items:center;justify-content:space-between;margin-top:12px;}
+  .pill{padding:5px 11px;border-radius:999px;background:rgba(255,255,255,.14);font-size:12px;font-weight:600;}
+
+  .p-hud{position:absolute;left:50%;bottom:170px;transform:translateX(-50%);
+    padding:9px 16px;border-radius:999px;background:rgba(0,0,0,.62);font-size:13px;z-index:6;}
+
+  /* ---------- 搜索 ---------- */
+  .searchbar{display:flex;gap:10px;padding:8px 16px 12px;}
+  .sfield{flex:1;height:42px;border-radius:12px;background:rgba(255,255,255,.06);
+    display:flex;align-items:center;gap:8px;padding:0 12px;}
+  .sfield .ph{font-size:14px;color:var(--text3);}
+  .cancel{font-size:14px;color:var(--accent);display:flex;align-items:center;}
+
+  .rowchips{display:flex;flex-wrap:wrap;gap:8px;}
+  .srcrow{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:13px;color:var(--text2);}
+  .srcrow .d{width:6px;height:6px;border-radius:50%;background:var(--grad);}
+  .srcrow .ty{margin-left:auto;font-size:10px;color:var(--text3);}
+
+  /* ---------- 我的 ---------- */
+  .lhead{display:flex;align-items:center;gap:14px;padding:10px 16px 0;}
+  .avatar{width:52px;height:52px;border-radius:50%;background:rgba(255,255,255,.08);
+    display:flex;align-items:center;justify-content:center;font-size:20px;
+    box-shadow:0 0 26px rgba(76,141,255,.35);}
+  .stats{display:flex;gap:10px;padding:18px 16px 0;}
+  .stat{flex:1;border-radius:14px;background:var(--panel);border:1px solid rgba(255,255,255,.06);
+    padding:14px 0;text-align:center;}
+  .stat .v{font-size:19px;font-weight:800;}
+  .stat .l{font-size:11px;color:var(--text3);margin-top:4px;}
+
+  .seg{display:flex;gap:4px;margin:18px 16px 0;padding:4px;border-radius:12px;background:rgba(255,255,255,.05);}
+  .seg div{flex:1;text-align:center;padding:9px 0;font-size:13px;color:var(--text3);border-radius:9px;}
+  .seg div.on{background:var(--grad);color:#fff;font-weight:600;}
+
+  .lrow{display:flex;gap:12px;padding:10px;border-radius:14px;background:var(--panel);
+    border:1px solid rgba(255,255,255,.06);margin-bottom:10px;align-items:center;}
+  .lrow .p{width:56px;height:80px;border-radius:8px;overflow:hidden;flex:none;position:relative;}
+  .lrow .n{font-size:14px;font-weight:500;}
+  .lrow .s{font-size:11px;color:var(--text3);margin-top:4px;}
+  .lrow .prog{height:3px;border-radius:2px;background:rgba(255,255,255,.08);margin-top:8px;position:relative;}
+  .lrow .prog i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--grad);}
+  .lrow .pt{font-size:10px;color:var(--text3);margin-top:6px;}
+  .chev{margin-left:auto;font-size:11px;color:var(--text3);}
+
+  /* ---------- 直播 ---------- */
+  .lgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+  .ch{display:flex;align-items:center;gap:8px;height:40px;padding:0 10px;border-radius:10px;
+    background:rgba(255,255,255,.045);font-size:12px;color:var(--text2);}
+  .ch .i{font-size:12px;color:var(--accent);}
+  .ch .c{margin-left:auto;font-size:9px;color:var(--text3);font-weight:700;}
+
+  /* ---------- Tab 栏 ---------- */
+  .tabbar{
+    flex:none;height:74px;display:flex;padding-bottom:14px;
+    background:rgba(12,15,24,.96);border-top:1px solid rgba(255,255,255,.06);
+    backdrop-filter:blur(20px);position:relative;z-index:40;
+  }
+  .tabbar .tab{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    font-size:10px;color:var(--text3);}
+  .tabbar .tab svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.8;
+    stroke-linecap:round;stroke-linejoin:round;}
+  .tabbar .tab.on{color:var(--accent);}
+
+  .backbtn{
+    position:absolute;top:54px;left:16px;z-index:30;
+    width:34px;height:34px;border-radius:50%;
+    background:rgba(0,0,0,.42);backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,.16);
+    display:flex;align-items:center;justify-content:center;
+    font-size:20px;line-height:1;color:#fff;padding-bottom:2px;
+  }
+  .homebar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);
+    width:134px;height:5px;border-radius:3px;background:rgba(255,255,255,.28);z-index:70;}
+
+  /* ---------- 右侧说明 ---------- */
+  .legend{width:270px;color:var(--text2);font-size:13px;line-height:1.85;}
+  .legend h1{font-size:24px;color:#fff;margin:0 0 6px;letter-spacing:1px;}
+  .legend .sub{color:var(--text3);font-size:12px;margin-bottom:20px;letter-spacing:2px;}
+  .legend .k{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.06);}
+  .legend .k b{color:#fff;font-weight:600;width:74px;flex:none;}
+  .legend .k span{color:var(--text3);font-size:12px;}
+  .legend .hint{margin-top:18px;font-size:11px;color:var(--text3);line-height:1.7;}
+  @media (max-width:1100px){ .legend{display:none;} }
+</style>
+</head>
+<body>
+<div class="stage">
+  <div class="phone" id="phone">
+    <div class="screen-wrap">
+      <div class="notch"></div>
+
+      <!-- ============ 首页 ============ -->
+      <section class="screen active" id="s-home">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons">
+            <span class="bars"><i></i><i></i><i></i><i></i></span>
+            <svg width="15" height="11" viewBox="0 0 15 11" fill="#fff"><path d="M7.5 9.6a1.1 1.1 0 100-2.2 1.1 1.1 0 000 2.2zM4.2 6.3a4.7 4.7 0 016.6 0l-1.2 1.2a3 3 0 00-4.2 0L4.2 6.3zM1.6 3.7a8.4 8.4 0 0111.8 0l-1.2 1.2a6.7 6.7 0 00-9.4 0L1.6 3.7z"/></svg>
+            <span class="battery"><i></i></span>
+          </span>
+        </div>
+
+        <div class="topbar">
+          <div class="source"><span class="dot"></span>星云资源<span class="caret">▼</span></div>
+          <div class="iconbtn">⟳</div>
+        </div>
+
+        <div class="scroll">
+          <div class="pad">
+            <div class="hrow"><span class="t">本周热门</span><span class="s">6 部</span></div>
+            <div class="hero">
+              <div class="blur" style="background:linear-gradient(135deg,#6b3a1e,#c07a3a 45%,#2b1a12)"></div>
+              <div class="veil"></div>
+              <div class="body">
+                <div class="p" style="background:linear-gradient(160deg,#8a5a2b,#3d2b1f)"></div>
+                <div class="info">
+                  <div class="title">沙丘 2</div>
+                  <div class="sub">4K 蓝光 · 更新至全集</div>
+                  <div class="m">2024 · 美国 · 科幻</div>
+                  <div class="playbtn">▶ 立即观看</div>
+                </div>
+              </div>
+            </div>
+            <div class="dots"><i class="on"></i><i></i><i></i><i></i></div>
+          </div>
+
+          <div class="cats" id="cats"></div>
+          <div class="pad" style="padding-bottom:20px">
+            <div class="grid" id="homeGrid"></div>
+            <div style="text-align:center;font-size:11px;color:var(--text3);padding:20px 0 8px">— 已经到底了 —</div>
+          </div>
+        </div>
+
+        <nav class="tabbar">
+          <div class="tab on" data-go="s-home">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
+            <span>首页</span>
+          </div>
+          <div class="tab" data-go="s-live">
+            <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M8 2.5L12 6l4-3.5"/></svg>
+            <span>直播</span>
+          </div>
+          <div class="tab" data-go="s-search">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <span>搜索</span>
+          </div>
+          <div class="tab" data-go="s-library">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg>
+            <span>我的</span>
+          </div>
+        </nav>
+      </section>
+
+      <!-- ============ 直播 ============ -->
+      <section class="screen" id="s-live">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="battery"><i></i></span></span>
+        </div>
+        <div style="padding:6px 16px 12px;display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:20px;font-weight:800">电视直播</div>
+          <div style="font-size:11px;color:var(--text3)">128 个频道</div>
+        </div>
+        <div class="cats" style="padding-top:0" id="liveCats"></div>
+        <div class="scroll pad" style="padding-top:4px">
+          <div class="lgrid" id="liveGrid"></div>
+        </div>
+        <nav class="tabbar">
+          <div class="tab" data-go="s-home"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>首页</span></div>
+          <div class="tab on" data-go="s-live"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M8 2.5L12 6l4-3.5"/></svg><span>直播</span></div>
+          <div class="tab" data-go="s-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>搜索</span></div>
+          <div class="tab" data-go="s-library"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span>我的</span></div>
+        </nav>
+      </section>
+
+      <!-- ============ 搜索 ============ -->
+      <section class="screen" id="s-search">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="battery"><i></i></span></span>
+        </div>
+        <div class="searchbar">
+          <div class="sfield">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.36)" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+            <span class="ph">搜索影片、演员、导演</span>
+          </div>
+          <div class="cancel">取消</div>
+        </div>
+        <div class="scroll pad">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 12px">
+            <span style="font-size:15px;font-weight:700">最近搜索</span>
+            <span style="font-size:12px;color:var(--text3)">清空</span>
+          </div>
+          <div class="rowchips" style="margin-bottom:26px">
+            <span class="chip">沙丘</span><span class="chip">繁花</span><span class="chip">三体</span>
+            <span class="chip">诺兰</span><span class="chip">2024 科幻</span><span class="chip">狂飙</span>
+          </div>
+
+          <div style="font-size:15px;font-weight:700;margin-bottom:6px">正在搜索的源</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:10px">会在 6 个源里同时搜索，结果按来源去重。</div>
+          <div id="srcList"></div>
+
+          <div style="margin:26px 0 10px;font-size:15px;font-weight:700">搜索结果</div>
+          <div class="grid" id="searchGrid"></div>
+        </div>
+        <nav class="tabbar">
+          <div class="tab" data-go="s-home"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>首页</span></div>
+          <div class="tab" data-go="s-live"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M8 2.5L12 6l4-3.5"/></svg><span>直播</span></div>
+          <div class="tab on" data-go="s-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>搜索</span></div>
+          <div class="tab" data-go="s-library"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span>我的</span></div>
+        </nav>
+      </section>
+
+      <!-- ============ 我的 ============ -->
+      <section class="screen" id="s-library">
+        <div class="statusbar">
+          <span>9:41</span>
+          <span class="icons"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="battery"><i></i></span></span>
+        </div>
+        <div class="lhead">
+          <div class="avatar">▶</div>
+          <div>
+            <div style="font-size:17px;font-weight:800">云影视</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:3px">星云资源</div>
+          </div>
+          <div class="iconbtn" style="margin-left:auto">⚙</div>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><div class="v">12</div><div class="l">收藏</div></div>
+          <div class="stat"><div class="v">36</div><div class="l">观看记录</div></div>
+          <div class="stat"><div class="v">6</div><div class="l">可用源</div></div>
+        </div>
+
+        <div class="seg"><div class="on">收藏</div><div>历史</div></div>
+
+        <div class="scroll pad" style="padding-top:14px">
+          <div id="libList"></div>
+        </div>
+        <nav class="tabbar">
+          <div class="tab" data-go="s-home"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>首页</span></div>
+          <div class="tab" data-go="s-live"><svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M8 2.5L12 6l4-3.5"/></svg><span>直播</span></div>
+          <div class="tab" data-go="s-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>搜索</span></div>
+          <div class="tab on" data-go="s-library"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5"/></svg><span>我的</span></div>
+        </nav>
+      </section>
+
+      <!-- ============ 详情 ============ -->
+      <section class="screen" id="s-detail">
+        <div class="statusbar" style="position:absolute;left:0;right:0;top:0">
+          <span>9:41</span>
+          <span class="icons"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="battery"><i></i></span></span>
+        </div>
+        <div class="backbtn" data-go="s-home">‹</div>
+
+        <div class="scroll" style="padding-top:0">
+          <div class="dhead">
+            <div class="blur" style="background:linear-gradient(135deg,#6b3a1e,#c07a3a 45%,#2b1a12)"></div>
+            <div class="fade"></div>
+            <div class="body">
+              <div class="p" style="background:linear-gradient(160deg,#8a5a2b,#3d2b1f)"></div>
+              <div style="flex:1;padding-bottom:6px">
+                <div class="title">沙丘 2</div>
+                <div class="meta">2024 · 美国 · 科幻</div>
+                <div class="note">4K 蓝光 · 全 1 集</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <div class="btn-main" data-go="s-player">▶ 播放 正片</div>
+            <div class="btn-fav on">♥</div>
+          </div>
+
+          <div class="sect">
+            <div class="hrow"><span class="t">播放线路</span><span class="s">3 条</span></div>
+            <div style="display:flex;gap:8px;overflow-x:auto;scrollbar-width:none">
+              <span class="chip on">线路一</span><span class="chip">线路二</span><span class="chip">线路三</span>
+            </div>
+          </div>
+
+          <div class="sect">
+            <div class="hrow"><span class="t">选集</span><span class="s">共 10 集</span></div>
+            <div class="epgrid" id="epGrid"></div>
+          </div>
+
+          <div class="sect" style="padding-bottom:30px">
+            <div class="hrow"><span class="t">剧情简介</span></div>
+            <div class="panelbox">
+              <div class="desc">保罗·厄崔迪与契妮和弗雷曼人联手，踏上复仇之路。面对摧毁他家族的阴谋者，他必须在挚爱与已知宇宙的命运之间做出抉择，并竭力阻止只有他能预见的可怕未来。</div>
+              <div class="more">展开全部</div>
+            </div>
+            <div class="panelbox" style="margin-top:10px">
+              <div style="display:flex;gap:10px;font-size:12px;margin-bottom:8px">
+                <span style="color:var(--text3);width:34px">导演</span>
+                <span style="color:var(--text2);flex:1">丹尼斯·维伦纽瓦</span>
+              </div>
+              <div style="display:flex;gap:10px;font-size:12px">
+                <span style="color:var(--text3);width:34px">主演</span>
+                <span style="color:var(--text2);flex:1">提莫西·查拉梅 / 赞达亚 / 丽贝卡·弗格森</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 播放器 ============ -->
+      <section class="screen" id="s-player">
+        <div class="vwrap">
+          <div class="vframe">
+            <div class="glow"></div><div class="glow2"></div>
+            <div class="label">AVPLAYER SURFACE</div>
+          </div>
+        </div>
+
+        <div class="p-top">
+          <div class="p-close" data-go="s-detail">✕</div>
+          <div>
+            <div class="p-title">沙丘 2</div>
+            <div class="p-sub">线路一 · 正片</div>
+          </div>
+        </div>
+
+        <div class="p-center">
+          <div class="p-side">⟲15</div>
+          <div class="p-play">❚❚</div>
+          <div class="p-side">15⟳</div>
+        </div>
+
+        <div class="p-hud">亮度 68%</div>
+
+        <div class="p-bottom">
+          <div class="p-progress">
+            <div class="p-time">00:42:18</div>
+            <div class="track"><i></i><b></b></div>
+            <div class="p-time r">02:46:00</div>
+          </div>
+          <div class="p-tools">
+            <span class="pill">倍速</span>
+            <span class="pill">下一集 ›</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="homebar"></div>
+    </div>
+  </div>
+
+  <aside class="legend">
+    <h1>云影视</h1>
+    <div class="sub">iOS · SWIFTUI · 界面预览</div>
+    <div class="k"><b>参考来源</b><span>tvbox-Swift 的功能与信息架构</span></div>
+    <div class="k"><b>配色</b><span>深空底 #06070B + 蓝紫渐变 #4C8DFF → #9B6BFF</span></div>
+    <div class="k"><b>首页</b><span>源切换 / 推荐位 / 吸顶分类 / 三列海报流</span></div>
+    <div class="k"><b>详情</b><span>模糊海报头图 / 线路 / 选集 / 简介</span></div>
+    <div class="k"><b>播放器</b><span>双击快进 / 拖动调亮度音量 / 捏合缩放</span></div>
+    <div class="hint">点底部 Tab 切换页面，点海报进详情页，点「播放」进播放器。</div>
+  </aside>
+</div>
+
+<script>
+const MOVIES = [
+  {t:'沙丘 2',        note:'4K',   meta:'2024 · 美国 · 科幻', c:['#8a5a2b','#3d2b1f']},
+  {t:'繁花',          note:'全30集', meta:'2023 · 内地 · 剧集', c:['#6b2f3a','#2a1218']},
+  {t:'流浪地球 3',    note:'蓝光',  meta:'2025 · 内地 · 科幻', c:['#1f4a6b','#0b1a26']},
+  {t:'漫长的季节',    note:'全12集', meta:'2023 · 内地 · 悬疑', c:['#3f4a2b','#161a0f']},
+  {t:'三体',          note:'全30集', meta:'2023 · 内地 · 科幻', c:['#2b3a67','#12172b']},
+  {t:'狂飙',          note:'全39集', meta:'2023 · 内地 · 犯罪', c:['#5a2b2b','#1e0f0f']},
+  {t:'奥本海默',      note:'HD',   meta:'2023 · 美国 · 传记', c:['#4a3b2b','#191410']},
+  {t:'蜘蛛侠：纵横宇宙', note:'HD', meta:'2023 · 美国 · 动画', c:['#5b2b6b','#1e0f26']},
+  {t:'消失的她',      note:'HD',   meta:'2023 · 内地 · 悬疑', c:['#2b5a55','#0e1f1d']},
+  {t:'封神第一部',    note:'4K',   meta:'2023 · 内地 · 奇幻', c:['#6b522b','#241a0f']},
+  {t:'年会不能停',    note:'HD',   meta:'2023 · 内地 · 喜剧', c:['#2b4a6b','#0f1a26']},
+  {t:'热辣滚烫',      note:'HD',   meta:'2024 · 内地 · 剧情', c:['#6b2b4a','#24101a']},
+  {t:'飞驰人生 2',    note:'HD',   meta:'2024 · 内地 · 喜剧', c:['#3b2b6b','#14102b']},
+  {t:'第二十条',      note:'HD',   meta:'2024 · 内地 · 剧情', c:['#2b6b52','#0f2419']},
+  {t:'八角笼中',      note:'HD',   meta:'2023 · 内地 · 剧情', c:['#5a4a2b','#1e1810']},
+];
+
+const poster = (m, cls='') => `
+  <div class="poster ${cls}">
+    <div class="art" style="background:linear-gradient(160deg,${m.c[0]},${m.c[1]})"></div>
+    <div class="scrim"></div>
+    <div class="glyph">${m.t.slice(0,2)}</div>
+    ${m.note ? `<div class="note">${m.note}</div>` : ''}
+  </div>`;
+
+const item = (m) => `
+  <div class="item" data-go="s-detail">
+    ${poster(m)}
+    <div class="name">${m.t}</div>
+    <div class="meta">${m.meta}</div>
+  </div>`;
+
+document.getElementById('homeGrid').innerHTML = MOVIES.map(item).join('');
+document.getElementById('searchGrid').innerHTML = MOVIES.slice(0,6).map(item).join('');
+
+document.getElementById('cats').innerHTML =
+  ['推荐','电影','剧集','综艺','动漫','纪录片','体育'].map((n,i)=>
+    `<span class="chip ${i===0?'on':''}">${n}</span>`).join('');
+
+document.getElementById('liveCats').innerHTML =
+  ['央视','卫视','影视','体育','少儿','地方'].map((n,i)=>
+    `<span class="chip ${i===0?'on':''}">${n}</span>`).join('');
+
+const CHANNELS = [
+  ['CCTV-1 综合',2],['CCTV-5 体育',3],['CCTV-6 电影',1],['CCTV-13 新闻',2],
+  ['湖南卫视',4],['浙江卫视',2],['东方卫视',3],['江苏卫视',1],
+  ['北京卫视',2],['广东卫视',1],['凤凰中文',2],['翡翠台',1]
+];
+document.getElementById('liveGrid').innerHTML = CHANNELS.map(([n,c])=>
+  `<div class="ch"><span class="i">▣</span>${n}<span class="c">${c>1?c:''}</span></div>`).join('');
+
+document.getElementById('srcList').innerHTML =
+  ['星云资源','极速影视','老猫资源','天空影视','月亮点播','豆瓣资源'].map(n=>
+    `<div class="srcrow"><span class="d"></span>${n}<span class="ty">JSON</span></div>`).join('');
+
+document.getElementById('epGrid').innerHTML =
+  Array.from({length:10},(_,i)=>
+    `<div class="ep ${i===0?'on':''}">第${i+1}集</div>`).join('');
+
+const LIB = [
+  {m:MOVIES[0], line:'线路一 · 第 3 集', p:62, t:'已看 42:18'},
+  {m:MOVIES[1], line:'线路二 · 第 12 集', p:28, t:'已看 18:40'},
+  {m:MOVIES[3], line:'线路一 · 第 6 集', p:85, t:'已看 51:02'},
+  {m:MOVIES[6], line:'线路三 · 正片',    p:12, t:'已看 09:31'},
+];
+document.getElementById('libList').innerHTML = LIB.map(x=>`
+  <div class="lrow" data-go="s-detail">
+    <div class="p">${poster(x.m)}</div>
+    <div style="flex:1;min-width:0">
+      <div class="n">${x.m.t}</div>
+      <div class="s">${x.line}</div>
+      <div class="prog"><i style="width:${x.p}%"></i></div>
+      <div class="pt">${x.t}</div>
+    </div>
+    <span class="chev">›</span>
+  </div>`).join('');
+
+// ---------- 路由 ----------
+const screens = [...document.querySelectorAll('.screen')];
+const tabbarOf = (id) => document.querySelector('#'+id+' .tabbar');
+
+function go(id){
+  screens.forEach(s=>s.classList.toggle('active', s.id===id));
+  // 详情页和播放器隐藏 Tab 栏
+  document.querySelectorAll('.tabbar').forEach(t=>t.style.display='');
+  if(id==='s-detail' || id==='s-player'){
+    const t = tabbarOf(id);
+    if(t) t.style.display='none';
+  }
+}
+
+document.addEventListener('click', (e)=>{
+  const el = e.target.closest('[data-go]');
+  if(el){ go(el.dataset.go); }
+  const chip = e.target.closest('.chip');
+  if(chip && chip.parentElement){
+    chip.parentElement.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+    chip.classList.add('on');
+  }
+  const ep = e.target.closest('.ep');
+  if(ep){
+    ep.parentElement.querySelectorAll('.ep').forEach(c=>c.classList.remove('on'));
+    ep.classList.add('on');
+    go('s-player');
+  }
+  const fav = e.target.closest('.btn-fav');
+  if(fav){ fav.classList.toggle('on'); }
+});
+
+// 自适应缩放
+function fit(){
+  const p = document.getElementById('phone');
+  const scale = Math.min(1, (window.innerHeight - 60) / 844);
+  p.style.transform = `scale(${scale})`;
+}
+window.addEventListener('resize', fit);
+fit();
+</script>
+</body>
+</html>
