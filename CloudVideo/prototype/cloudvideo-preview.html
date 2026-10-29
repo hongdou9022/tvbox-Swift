@@ -89,10 +89,56 @@
   .shead .box{flex:1;height:36px;border-radius:18px;background:var(--deep);display:flex;align-items:center;gap:8px;padding:0 14px;}
   .shead .box .ph{font-size:13px;color:var(--t4);flex:1;}
   .shead .go{font-size:12px;font-weight:700;color:var(--accent);}
-  .scope{display:flex;align-items:center;gap:10px;padding:0 14px 10px;}
-  .scope .pill{font-size:12px;color:var(--accent);background:rgba(43,213,118,.12);
-    padding:0 12px;height:30px;display:flex;align-items:center;gap:4px;border-radius:999px;white-space:nowrap;}
-  .scope .tip{font-size:11px;color:var(--t4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  /* 搜索范围按钮：位于搜索框内部最左侧（v1.4） */
+  .sbox{height:36px;border-radius:18px;background:var(--deep);display:flex;align-items:center;gap:6px;padding:0 10px 0 5px;}
+  .scopebtn{height:28px;max-width:88px;display:flex;align-items:center;gap:2px;padding:0 8px;
+    font-size:12px;color:var(--accent);white-space:nowrap;overflow:hidden;cursor:pointer;flex:none;}
+  .scopebtn i{font-size:9px;font-style:normal;transform:rotate(90deg);}
+  .vline{width:1px;height:16px;background:rgba(255,255,255,.12);flex:none;}
+  .sbox .ph{font-size:13px;color:var(--t4);flex:1;white-space:nowrap;overflow:hidden;}
+  .sbox svg{fill:none;stroke-width:1.8;flex:none;}
+
+  /* 统计行：常驻 18dp 单行（v1.14） */
+  .stat{height:18px;line-height:18px;margin-top:6px;padding:0 14px;font-size:11px;color:var(--t3);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+  /* 结果：左右分栏（v1.8）+ 单列横排卡（v1.11 / v1.12） */
+  .sresult{display:flex;margin-top:6px;flex:1;overflow:hidden;}
+  .rail{width:124px;flex:none;overflow-y:auto;padding:0 10px 20px;scrollbar-width:none;}
+  .rail::-webkit-scrollbar{display:none;}
+  .ritem{height:38px;border-radius:8px;background:#22252C;color:var(--t2);font-size:11px;
+    display:flex;align-items:center;justify-content:center;margin-bottom:6px;cursor:pointer;
+    white-space:nowrap;overflow:hidden;padding:0 6px;}
+  .ritem.on{background:#1F3B2E;color:var(--accent);}
+  .slist{flex:1;overflow-y:auto;padding:0 14px 24px 4px;scrollbar-width:none;}
+  .slist::-webkit-scrollbar{display:none;}
+  .scard{display:flex;gap:9px;padding:8px;border-radius:10px;background:var(--deep);margin-bottom:12px;cursor:pointer;}
+  .scard .art2{width:70px;height:96px;border-radius:6px;flex:none;}
+  .scard .info{flex:1;min-width:0;}
+  .scard .st{font-size:15px;font-weight:700;line-height:22px;height:44px;overflow:hidden;color:#fff;}
+  .scard .ss{font-size:12px;color:var(--accent);height:19px;line-height:19px;}
+  .scard .se{font-size:12px;color:var(--t3);height:19px;line-height:19px;}
+
+  /* 电视设备 / 遥控 / 设置 */
+  .dev{display:flex;align-items:center;gap:12px;padding:14px;border-radius:10px;background:var(--deep);margin-bottom:9px;}
+  .dev .dico{width:38px;height:38px;border-radius:9px;background:rgba(43,213,118,.12);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;font-size:15px;flex:none;}
+  .remote{display:flex;flex-direction:column;align-items:center;gap:8px;}
+  .rrow{display:flex;gap:8px;}
+  .rbtn{width:58px;height:44px;border-radius:10px;background:var(--card);color:#fff;font-size:16px;
+    display:flex;align-items:center;justify-content:center;}
+  .rbtn.ok{color:var(--accent);}
+  .grouptitle{font-size:12px;font-weight:600;color:var(--t3);margin:16px 0 8px 2px;}
+  .group{background:var(--deep);border-radius:10px;padding:0 14px;}
+  .grow{display:flex;align-items:center;justify-content:space-between;height:44px;font-size:13px;color:#fff;}
+  .grow em{font-style:normal;font-size:13px;color:var(--t2);}
+  .gline{height:1px;background:rgba(255,255,255,.06);}
+  .secthead .more{margin-left:auto;font-size:11px;color:var(--t4);}
+
+  /* 历史记录胶囊 */
+  .chips{display:flex;flex-wrap:wrap;gap:8px;padding:0 14px;}
+  .chip{max-width:150px;padding:7px 12px;border-radius:16px;background:#22252C;color:var(--t2);
+    font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;}
   .hotttl{display:flex;justify-content:space-between;align-items:center;padding:6px 14px 12px;}
   .hotttl span{font-size:15px;font-weight:700;color:var(--accent);}
   .hotttl em{font-size:11px;color:var(--t4);font-style:normal;}
@@ -301,22 +347,33 @@
       <!-- ===== 搜索 ===== -->
       <section class="screen" id="s-search">
         <div class="statusbar"><span>9:41</span><span class="ic"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="bat"><i></i></span></span></div>
-        <div class="shead">
-          <div style="font-size:20px;line-height:1;color:#fff;cursor:pointer" data-go="s-home">‹</div>
-          <div class="box">
-            <svg width="14" height="14" viewBox="0 0 24 24" style="stroke:#5F6470;fill:none;stroke-width:1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <div class="shead" style="padding:8px 14px 4px">
+          <div style="font-size:20px;line-height:1;color:#fff;cursor:pointer;flex:none" data-go="s-home">‹</div>
+          <div class="sbox">
+            <div class="scopebtn">全站 <i>›</i></div>
+            <div class="vline"></div>
+            <svg width="13" height="13" viewBox="0 0 24 24" style="stroke:#5F6470"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
             <span class="ph">搜索影片名/演员/导演</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" style="stroke:#2BD576"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           </div>
-          <div class="go">搜索</div>
         </div>
-        <div class="scope"><div class="pill">全站 <span style="font-size:8px">▾</span></div><div class="tip">全站搜索会同时查询所有来源，较慢</div></div>
-        <div class="scroll">
-          <div class="hotttl"><span>最近热搜</span><em>清空</em></div>
+
+        <div class="stat" id="stat" style="display:none">已返回 4 个来源（查询 6 个站点）</div>
+
+        <!-- 空态：最近热搜 + 历史记录（v1.9 拆分） -->
+        <div class="scroll" id="searchEmpty">
+          <div class="hotttl"><span>最近热搜</span></div>
           <div class="hotgrid" id="hot"></div>
           <div style="height:22px"></div>
-          <div class="status">已返回 4 个来源（查询 6 个站点）</div>
-          <div class="grid2" id="results"></div>
+          <div class="hotttl"><span style="color:#fff">历史记录</span><em>清空</em></div>
+          <div class="chips" id="hist"></div>
           <div style="height:20px"></div>
+        </div>
+
+        <!-- 结果态：源栏 + 单列卡片 -->
+        <div class="sresult" id="searchResult" style="display:none">
+          <div class="rail" id="rail"></div>
+          <div class="slist" id="slist"></div>
         </div>
         <nav class="tabbar" data-tab></nav>
       </section>
@@ -410,21 +467,120 @@
           </div>
 
           <div class="sect">
+            <div class="secthead"><b></b><span>观看历史</span><span class="more">5</span></div>
+            <div class="hscroll" id="hist2"></div>
+          </div>
+
+          <div class="sect">
             <div class="secthead"><b></b><span>收藏</span></div>
             <div class="grid3" id="favs"></div>
           </div>
 
-          <div class="setrow"><span>⚙</span>设置<span class="c">›</span></div>
+          <div class="sect">
+            <div class="secthead"><b></b><span>追剧</span><span class="more">3</span></div>
+            <div class="grid3" id="follows"></div>
+          </div>
+
+          <div class="setrow" data-go="s-settings"><span>⚙</span>设置<span class="c">›</span></div>
         </div>
         <nav class="tabbar" data-tab></nav>
       </section>
 
-      <!-- ===== 电视 / 直播（占位） ===== -->
+      <!-- ===== 设置 ===== -->
+      <section class="screen" id="s-settings">
+        <div class="statusbar"><span>9:41</span><span class="ic"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="bat"><i></i></span></span></div>
+        <div style="padding:8px 14px 12px;display:flex;align-items:center;gap:8px">
+          <div style="font-size:20px;line-height:1;cursor:pointer" data-go="s-mine">‹</div>
+          <div style="font-size:16px;font-weight:700">设置</div>
+        </div>
+        <div class="scroll" style="padding:0 14px 24px">
+          <div class="grouptitle">服务器</div>
+          <div class="group">
+            <div class="grow"><span>名称</span><em>云影视</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>地址</span><em>192.168.1.10:7025</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>账号</span><em>admin</em></div>
+          </div>
+
+          <div class="grouptitle">播放与搜索</div>
+          <div class="group">
+            <div class="grow"><span>清晰度偏好</span><em>自动 ›</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>弹幕默认开启</span><em style="color:var(--accent)">开</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>播放器解码方式</span><em>系统解码 ›</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>搜索源评分</span><em>6 个源 ›</em></div>
+          </div>
+
+          <div class="grouptitle">源评分（按分数降序）</div>
+          <div class="group">
+            <div class="grow"><span>量子资源站</span><em style="color:var(--accent)">64.5</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>荐片 <b style="font-size:10px;color:var(--t4);font-weight:400">·源</b></span><em style="color:var(--accent)">61.7</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>影视工厂</span><em>52.1</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>非凡影视</span><em style="color:var(--t4)">50.0</em></div>
+            <div class="gline"></div>
+            <div class="grow"><span>莫小影</span><em style="color:var(--play)">38.4</em></div>
+          </div>
+        </div>
+        <nav class="tabbar" data-tab></nav>
+      </section>
+
+      <!-- ===== 电视 / 直播 ===== -->
       <section class="screen" id="s-tv">
         <div class="statusbar"><span>9:41</span><span class="ic"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="bat"><i></i></span></span></div>
-        <div style="padding:10px 14px 14px;font-size:17px;font-weight:700">电视</div>
-        <div class="scroll" style="display:flex;align-items:center;justify-content:center;color:var(--t4);font-size:13px;text-align:center;line-height:2">
-          还没有配对过电视<br>请确认电视已打开「手机推送」<br>并与手机在同一网络
+        <div style="padding:10px 14px 14px;display:flex;align-items:center">
+          <div style="font-size:17px;font-weight:700">电视</div>
+          <div style="margin-left:auto;font-size:12px;color:var(--accent)">重新扫描</div>
+        </div>
+        <div class="scroll" style="padding:0 14px 20px">
+          <div class="dev">
+            <div class="dico">▣</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;color:#fff">TV-客厅</div>
+              <div style="font-size:11px;color:var(--t4)">192.168.1.23</div>
+            </div>
+            <div style="font-size:11px;color:var(--accent)">· 已配对</div>
+            <div style="font-size:11px;color:var(--t4);margin-left:6px">›</div>
+          </div>
+          <div class="dev">
+            <div class="dico">▣</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;color:#fff">TV-卧室</div>
+              <div style="font-size:11px;color:var(--t4)">192.168.1.31</div>
+            </div>
+            <div style="font-size:11px;color:var(--t3)">· 需在电视上确认</div>
+            <div style="font-size:11px;color:var(--t4);margin-left:6px">›</div>
+          </div>
+
+          <div class="sect" style="margin-top:18px">
+            <div class="secthead"><b></b><span>遥控</span></div>
+            <div class="remote">
+              <div class="rrow"><div class="rbtn">▲</div></div>
+              <div class="rrow">
+                <div class="rbtn">◀</div>
+                <div class="rbtn ok">●</div>
+                <div class="rbtn">▶</div>
+              </div>
+              <div class="rrow"><div class="rbtn">▼</div></div>
+              <div class="rrow" style="margin-top:8px">
+                <div class="rbtn">⏮</div>
+                <div class="rbtn">⏯</div>
+                <div class="rbtn">⏭</div>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--t4);text-align:center;margin-top:10px">
+              正在播放 · 沙丘 2 · 第 3/8 集
+            </div>
+          </div>
+
+          <div style="font-size:11px;color:var(--t4);text-align:center;margin-top:16px">
+            在播放页点投屏图标可把当前内容推到电视
+          </div>
         </div>
         <nav class="tabbar" data-tab></nav>
       </section>
@@ -448,21 +604,23 @@
 
   <aside class="legend">
     <h1>云影视</h1>
-    <div class="sub">按 PHONE_UI_SPEC v1.0 重做</div>
+    <div class="sub">按 PHONE_UI_SPEC v1.14 + SEARCH_OPTIMIZATION + FUNCTION_API 重做</div>
     <div class="k"><b>配色</b><span>#0E0F13 / #151823 / 绿 #2BD576 / 橙 #FF7800</span></div>
-    <div class="k"><b>首页</b><span>196dp 轮播 · 3 列横卡 · 每区 6 个</span></div>
-    <div class="k"><b>分类</b><span>无轮播 · 无限滚动 · 没有更多了</span></div>
-    <div class="k"><b>搜索</b><span>范围选择 · 最近热搜 · 匹配度排序</span></div>
-    <div class="k"><b>详情</b><span>竖屏 16:9 · 收藏即时 · 4 列剧集</span></div>
-    <div class="k"><b>播放器</b><span>单行控件 · 横屏全屏 · 锁屏 · 弹幕</span></div>
-    <div class="k"><b>投屏</b><span>局域网发现 :10081 · 配对 · 失败回落服务端</span></div>
-    <div class="k"><b>直播</b><span>IPTV 分组 · m3u/txt 解析</span></div>
+    <div class="k"><b>首页</b><span>豆瓣直连四分区 · 196dp 轮播 · 3 列横卡 · 每区 6 个</span></div>
+    <div class="k"><b>分类</b><span>豆瓣分页 · 无轮播 · 无限滚动 · 没有更多了</span></div>
+    <div class="k"><b>搜索</b><span>范围在框内 · 统计行常驻 · 源栏分栏 · 单列四行卡</span></div>
+    <div class="k"><b>排序</b><span>匹配度 → 词序命中 → 源优先级 → 来源名 → 片名</span></div>
+    <div class="k"><b>搜索性能</b><span>逐源并发 · 3.5s/20s 预算 · 2 分钟缓存 · 5 分钟冷却 · 动态评分</span></div>
+    <div class="k"><b>详情/播放</b><span>竖屏 16:9 · 收藏即时 · 4 列剧集 · 横屏全屏 · 弹幕</span></div>
+    <div class="k"><b>投屏/电视</b><span>:10081 发现配对 · 回落服务端 · 遥控 /v2/command · 配对管理</span></div>
+    <div class="k"><b>直播</b><span>IPTV 分组 · 直播间 /api/live/stream</span></div>
+    <div class="k"><b>我的/弹窗</b><span>续播 · 历史 · 收藏 · 追剧；自绘确认卡 + 锚点下拉菜单</span></div>
     <div class="sw">
       <i style="background:#0E0F13"></i><i style="background:#151823"></i>
       <i style="background:#2BD576"></i><i style="background:#FF7800"></i>
       <i style="background:#2C303C"></i><i style="background:#1A1B22"></i>
     </div>
-    <div class="hint">点「连接」进首页，点卡片进详情，点 ⛶ 进横屏全屏，底部 Tab 切换主页面。</div>
+    <div class="hint">点「连接」进首页；搜索页点热搜看结果态（源栏 + 单列卡）；电视页看遥控；我的页进设置看「搜索源评分」。</div>
   </aside>
 </div>
 
@@ -518,17 +676,28 @@ document.getElementById('sections').innerHTML = SECTIONS.map(s=>`
 document.getElementById('catGrid').innerHTML =
   Array.from({length:12},(_,i)=>card(MOVIES[i % MOVIES.length])).join('');
 
+// 最近热搜：两列带序号 1–6，不属于用户数据，不提供删除（规范 4.2）
 document.getElementById('hot').innerHTML =
   ['沙丘','繁花','三体','诺兰','2024 科幻','狂飙'].map((w,i)=>
-    `<div class="hot" data-go="s-search"><b class="${i<3?'':'n'}">${i+1}</b>${w}</div>`).join('');
+    `<div class="hot" data-search="1"><b class="${i<3?'':'n'}">${i+1}</b>${w}</div>`).join('');
 
-document.getElementById('results').innerHTML = MOVIES.slice(0,6).map(m=>`
-  <div class="res" data-go="s-detail">
-    <div class="p"><div class="art" style="${art(m)}"></div></div>
-    <div>
-      <div class="n">${m.t}</div>
-      <div class="src">星云资源</div>
-      <div class="rm">${m.meta.split(' / ')[2] || 'HD'} · 更新至全集</div>
+// 历史记录：胶囊流式排列，长按删除单条
+document.getElementById('hist').innerHTML =
+  ['凡人修仙传','沙丘 2','繁花','漫长的季节','庆余年'].map(w=>
+    `<div class="chip" data-search="1">${w}</div>`).join('');
+
+// 结果页：源栏（全部 + 本次返回过结果的源）+ 单列四行等高卡片
+const SRC = ['全部','量子资源站','影视工厂','莫小影','荐片'];
+document.getElementById('rail').innerHTML = SRC.map((n,i)=>
+  `<div class="ritem ${i===0?'on':''}">${n}</div>`).join('');
+
+document.getElementById('slist').innerHTML = MOVIES.slice(0,6).map((m,i)=>`
+  <div class="scard" data-go="s-detail">
+    <div class="art2" style="${art(m)}"></div>
+    <div class="info">
+      <div class="st">${m.t}</div>
+      <div class="ss">${SRC[(i%4)+1]}</div>
+      <div class="se">${m.meta.split(' / ')[2] || 'HD'} · 更新至全集</div>
     </div>
   </div>`).join('');
 
@@ -544,6 +713,20 @@ document.getElementById('resume').innerHTML = MOVIES.slice(0,4).map((m,i)=>`
   </div>`).join('');
 
 document.getElementById('favs').innerHTML = MOVIES.slice(0,6).map(card).join('');
+
+document.getElementById('hist2').innerHTML = MOVIES.slice(3,7).map((m,i)=>`
+  <div class="hcard" data-go="s-detail">
+    <div class="p"><div class="art" style="${art(m)}"></div><div class="pg" style="width:${[40,72,18,90][i]}%"></div></div>
+    <div class="n">${m.t}</div>
+    <div class="s">第 ${i+2} 集</div>
+  </div>`).join('');
+
+document.getElementById('follows').innerHTML = MOVIES.slice(6,9).map(m=>`
+  <div class="item" data-go="s-detail">
+    <div class="poster"><div class="art" style="${art(m)}"></div></div>
+    <div class="name">${m.t}</div>
+    <div class="meta">更新至第 8 集</div>
+  </div>`).join('');
 
 const LIVE_GROUPS = ['央视','卫视','影视','体育','少儿'];
 document.getElementById('liveGroups').innerHTML = LIVE_GROUPS.map((n,i)=>
@@ -579,10 +762,25 @@ function go(id){
   if(!target) return;
   screens.forEach(s=>s.classList.toggle('on', s.id===id));
   current = id;
+  if(id === 's-search'){
+    document.getElementById('searchEmpty').style.display = 'block';
+    document.getElementById('searchResult').style.display = 'none';
+    document.getElementById('stat').style.display = 'none';
+  }
   fit();
 }
 
+// 规范 4.2：开始搜索时「最近热搜 + 历史记录」两块同时隐藏
+function showSearchResult(){
+  document.getElementById('searchEmpty').style.display = 'none';
+  document.getElementById('searchResult').style.display = 'flex';
+  document.getElementById('stat').style.display = 'block';
+}
+
 document.addEventListener('click', e=>{
+  const trigger = e.target.closest('[data-search]');
+  if(trigger){ showSearchResult(); return; }
+
   const ch = e.target.closest('[data-ch]');
   if(ch){
     const i = +ch.dataset.ch;
