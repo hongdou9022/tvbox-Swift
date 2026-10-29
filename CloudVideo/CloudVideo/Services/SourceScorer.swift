@@ -1,5 +1,13 @@
 import Foundation
 
+/// 评分参数。放在 `SourceScorer` 外面，避免嵌套结构体的 nonisolated 计算属性
+/// 引用 MainActor 隔离的 static let（Swift 6 会报错）。
+enum SourceScoreConfig {
+    /// 冷启动阈值：样本不足时向默认分收敛，避免一两次偶然结果决定排序。
+    static let minSamples = 3
+    static let defaultScore = 50.0
+}
+
 /// 源动态评分（SEARCH_OPTIMIZATION 2.9）。
 ///
 /// 思路：每次搜索都记录各源的真实表现，长期用下来稳定快速的源自然排到前面。
@@ -9,12 +17,8 @@ final class SourceScorer {
 
     static let shared = SourceScorer()
 
-    /// 冷启动阈值：样本不足时向默认分 50 收敛，避免一两次偶然结果决定排序。
-    static let minSamples = 3
-    static let defaultScore = 50.0
-
     struct Record: Codable {
-        var score: Double = SourceScorer.defaultScore
+        var score: Double = SourceScoreConfig.defaultScore
         var samples: Int = 0
         var successes: Int = 0
         var failures: Int = 0
@@ -29,9 +33,9 @@ final class SourceScorer {
 
         /// 冷启动收敛后的有效分。
         var effectiveScore: Double {
-            guard samples < SourceScorer.minSamples else { return score }
-            let c = Double(samples) / Double(SourceScorer.minSamples)
-            return SourceScorer.defaultScore * (1 - c) + score * c
+            guard samples < SourceScoreConfig.minSamples else { return score }
+            let c = Double(samples) / Double(SourceScoreConfig.minSamples)
+            return SourceScoreConfig.defaultScore * (1 - c) + score * c
         }
     }
 

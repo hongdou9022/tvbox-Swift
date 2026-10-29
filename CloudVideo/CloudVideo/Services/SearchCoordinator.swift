@@ -165,6 +165,8 @@ final class SearchCoordinator: ObservableObject {
         let ordered = orderByScore(available)
 
         isSearching = true
+        // 先给出「搜索中」文案，避免配置为空时界面还停在空态
+        baseStatus = makeBaseStatus(keyword: trimmed, targetCount: ordered.count)
 
         if ordered.isEmpty {
             // 配置不可用（未同步到源）→ 回落服务端聚合搜索
@@ -173,8 +175,6 @@ final class SearchCoordinator: ObservableObject {
             }
             return
         }
-
-        baseStatus = makeBaseStatus(keyword: trimmed, targetCount: ordered.count)
 
         currentTask = Task { [weak self] in
             await self?.runWindow(ordered, keyword: trimmed, page: page, generation: gen)
