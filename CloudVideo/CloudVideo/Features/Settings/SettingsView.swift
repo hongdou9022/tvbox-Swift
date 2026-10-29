@@ -30,6 +30,9 @@ enum PlayerPreferences {
 }
 
 /// 设置页（规范 7）。
+///
+/// 规范 0.5：不使用系统原生弹窗 —— 断线确认用 `phoneConfirm`，
+/// 清晰度 / 解码方式选择用贴锚点的 `PhoneDropdown`。
 struct SettingsView: View {
     @EnvironmentObject private var session: SessionStore
     @Environment(\.dismiss) private var dismiss
@@ -37,7 +40,12 @@ struct SettingsView: View {
     @State private var quality = PlayerPreferences.quality
     @State private var danmaku = PlayerPreferences.danmakuEnabled
     @State private var decoder = PlayerPreferences.decoder
+
     @State private var showLogoutConfirm = false
+    @State private var showScoreSheet = false
+
+    @State private var activeMenu: String?
+    @State private var menuAnchor: CGRect = .zero
 
     var body: some View {
         ScrollView(showsIndicators: false) {
@@ -53,13 +61,39 @@ struct SettingsView: View {
         .homeBackground()
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("断开连接？", isPresented: $showLogoutConfirm) {
-            Button("取消", role: .cancel) {}
-            Button("断开", role: .destructive) {
-                session.logout()
+        .overlay {
+            if let activeMenu {
+                PhoneDropdown(
+                    anchor: menuAnchor,
+                    options: menuOptions(activeMenu),
+                    selectedId: activeMenu == "quality" ? quality : decoder,
+                    onSelect: { option in
+                        if activeMenu == "quality" {
+                            quality = option.id
+                            PlayerPreferences.quality = option.id
+                        } else {
+                            decoder = option.id
+                            PlayerPreferences.decoder = option.id
+                        }
+                        self.activeMenu = nil
+                    },
+                    onDismiss: { self.activeMenu = nil }
+                )
             }
-        } message: {
-            Text("需要重新输入服务器地址和密码才能连接。")
+        }
+        .phoneConfirm(
+            isPresented: $showLogoutConfirm,
+            title: "断开连接？",
+            message: "需要重新输入服务器地址和密码才能连接。",
+            confirmTitle: "断开"
+        ) {
+            session.logout()
+        }
+        .sheet(isPresented: $showScoreSheet) {
+            SourceScoreSheet()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(Theme.bgDetail)
         }
     }
 
@@ -98,21 +132,17 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - 播放
+    // MARK: - 播放与搜索
 
     private var playbackSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("播放")
+            sectionTitle("播放与搜索")
 
             VStack(spacing: 0) {
-                Menu {
-                    ForEach(PlayerPreferences.qualityOptions, id: \.self) { option in
-                        Button(option) {
-                            quality = option
-                            PlayerPreferences.quality = option
-                        }
-                    }
-                } label: {
+                AnchoredRow(action: { rect in
+                    menuAnchor = rect
+                    activeMenu = "quality"
+                }) {
                     pickerRow("清晰度偏好", quality)
                 }
 
@@ -134,16 +164,21 @@ struct SettingsView: View {
 
                 Divider().background(Color.white.opacity(0.06))
 
-                Menu {
-                    ForEach(PlayerPreferences.decoderOptions, id: \.self) { option in
-                        Button(option) {
-                            decoder = option
-                            PlayerPreferences.decoder = option
-                        }
-                    }
-                } label: {
+                AnchoredRow(action: { rect in
+                    menuAnchor = rect
+                    activeMenu = "decoder"
+                }) {
                     pickerRow("播放器解码方式", decoder)
                 }
+
+                Divider().background(Color.white.opacity(0.06))
+
+                Button {
+                    showScoreSheet = true
+                } label: {
+                    pickerRow("搜索源评分", scoreSummary)
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14)
             .background(
@@ -151,6 +186,16 @@ struct SettingsView: View {
                     .fill(Theme.cardDeep)
             )
         }
+    }
+
+    private var scoreSummary: String {
+        let sampled = SourceScorer.shared.ranking().filter { $0.record.isSampled }
+        return sampled.isEmpty ? "未采样" : "\(sampled.count) 个源"
+    }
+
+    private func menuOptions(_ kind: String) -> [PhoneDropdownOption] {
+        let values = kind == "quality" ? PlayerPreferences.qualityOptions : PlayerPreferences.decoderOptions
+        return values.map { PhoneDropdownOption(id: $0, title: $0) }
     }
 
     // MARK: - 关于

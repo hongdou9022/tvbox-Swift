@@ -89,8 +89,10 @@
   .shead .box{flex:1;height:36px;border-radius:18px;background:var(--deep);display:flex;align-items:center;gap:8px;padding:0 14px;}
   .shead .box .ph{font-size:13px;color:var(--t4);flex:1;}
   .shead .go{font-size:12px;font-weight:700;color:var(--accent);}
-  .scope{display:flex;padding:0 14px 10px;}
-  .scope .pill{font-size:12px;color:var(--accent);background:rgba(43,213,118,.12);padding:6px 12px;border-radius:999px;}
+  .scope{display:flex;align-items:center;gap:10px;padding:0 14px 10px;}
+  .scope .pill{font-size:12px;color:var(--accent);background:rgba(43,213,118,.12);
+    padding:0 12px;height:30px;display:flex;align-items:center;gap:4px;border-radius:999px;white-space:nowrap;}
+  .scope .tip{font-size:11px;color:var(--t4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .hotttl{display:flex;justify-content:space-between;align-items:center;padding:6px 14px 12px;}
   .hotttl span{font-size:15px;font-weight:700;color:var(--accent);}
   .hotttl em{font-size:11px;color:var(--t4);font-style:normal;}
@@ -210,7 +212,7 @@
   /* ---------- 登录 ---------- */
   .login{flex:1;display:flex;flex-direction:column;padding:0 14px;}
   .logo{width:72px;height:72px;border-radius:18px;background:rgba(43,213,118,.14);display:flex;align-items:center;justify-content:center;font-size:30px;color:var(--accent);margin:70px auto 8px;}
-  .appname{font-size:28px;font-weight:700;text-align:center;letter-spacing:1px;}
+  .appname{font-size:26px;font-weight:700;text-align:center;letter-spacing:.08em;}
   .appslogan{font-size:13px;color:var(--t3);text-align:center;margin-top:8px;margin-bottom:26px;}
   .field{height:50px;border-radius:18px;background:var(--deep);border:1px solid var(--border);display:flex;align-items:center;gap:10px;padding:0 16px;margin-bottom:12px;font-size:14px;color:var(--t4);}
   .field .v{color:var(--t1);}
@@ -243,7 +245,7 @@
         <div class="statusbar"><span>9:41</span><span class="ic"><span class="bars"><i></i><i></i><i></i><i></i></span><span class="bat"><i></i></span></span></div>
         <div class="login">
           <div class="logo">▶</div>
-          <div class="appname">OmniBox</div>
+          <div class="appname">云影视</div>
           <div class="appslogan">连接你的媒体服务器</div>
           <div class="field"><span>🖥</span><span class="v">192.168.1.10:7025</span></div>
           <div class="field"><span>👤</span><span class="v">admin</span></div>
@@ -307,7 +309,7 @@
           </div>
           <div class="go">搜索</div>
         </div>
-        <div class="scope"><div class="pill">全站 ▾</div></div>
+        <div class="scope"><div class="pill">全站 <span style="font-size:8px">▾</span></div><div class="tip">全站搜索会同时查询所有来源，较慢</div></div>
         <div class="scroll">
           <div class="hotttl"><span>最近热搜</span><em>清空</em></div>
           <div class="hotgrid" id="hot"></div>

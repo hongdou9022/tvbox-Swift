@@ -404,4 +404,177 @@ final class CastService: ObservableObject {
         }
         return object
     }
+
+    // MARK: - 遥控（接口规范 4.14.6，电视端 /v2/state 与 /v2/command）
+
+    /// 电视播放状态。`position/duration` 单位是**毫秒**。
+    struct RemoteState {
+        let hasPlayer: Bool
+        let playing: Bool
+        let position: Int
+        let duration: Int
+        let title: String
+        /// 从 0 开始；无播放器时为 -1
+        let index: Int
+        let count: Int
+        let foreground: Bool
+
+        var progressRatio: Double {
+            guard duration > 0 else { return 0 }
+            return min(max(Double(position) / Double(duration), 0), 1)
+        }
+
+        var statusText: String {
+            if !hasPlayer { return "电视没有在播放" }
+            if !foreground { return "电视当前不在前台" }
+            return playing ? "正在播放" : "已暂停"
+        }
+    }
+
+    /// 遥控指令（接口规范 4.14.6 的指令表）。
+    enum RemoteCommand {
+        case up, down, left, right
+        case ok
+        case back
+        case play, pause, toggle
+        case next, prev
+        case forward, backward
+        case seek
+
+        var name: String {
+            switch self {
+            case .up: return "up"
+            case .down: return "down"
+            case .left: return "left"
+            case .right: return "right"
+            case .ok: return "ok"
+            case .back: return "back"
+            case .play: return "play"
+            case .pause: return "pause"
+            case .toggle: return "toggle"
+            case .next: return "next"
+            case .prev: return "prev"
+            case .forward: return "forward"
+            case .backward: return "backward"
+            case .seek: return "seek"
+            }
+        }
+    }
+
+    /// 读取电视播放状态。
+    func fetchState(for device: CastDevice) async throws -> RemoteState {
+        let pairToken = try await ensurePaired(device)
+        guard let url = URL(string: "http://\(device.ip):\(device.port)/v2/state") else {
+            throw CastError.lanUnreachable("地址无效")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 4
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(pairToken, forHTTPHeaderField: "X-Box-Token")
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw CastError.lanUnreachable(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw CastError.lanUnreachable("电视没有响应")
+        }
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+
+        return RemoteState(
+            hasPlayer: object["hasPlayer"] as? Bool ?? false,
+            playing: object["playing"] as? Bool ?? false,
+            position: object["position"] as? Int ?? 0,
+            duration: object["duration"] as? Int ?? 0,
+            title: object["title"] as? String ?? "",
+            index: object["index"] as? Int ?? -1,
+            count: object["count"] as? Int ?? 0,
+            foreground: object["foreground"] as? Bool ?? false
+        )
+    }
+
+    /// 发一条遥控指令。失败时返回服务端文案，由界面原样展示。
+    func sendCommand(
+        _ command: RemoteCommand,
+        value: Int? = nil,
+        to device: CastDevice
+    ) async -> String? {
+        do {
+            let pairToken = try await ensurePaired(device)
+
+            var body: [String: Any] = ["cmd": command.name]
+            if let value {
+                body["value"] = value
+            }
+
+            let response = try await post(
+                to: device,
+                path: "/v2/command",
+                body: body,
+                token: pairToken,
+                timeout: 5
+            )
+
+            if response["ok"] as? Bool == false {
+                return response["message"] as? String ?? "电视没有响应"
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// 让电视直接搜索某个关键词（遥控页的「在电视上搜索」）。
+    func searchOnTV(_ keyword: String, device: CastDevice) async -> String? {
+        do {
+            let pairToken = try await ensurePaired(device)
+            let response = try await post(
+                to: device,
+                path: "/v2/command",
+                body: ["cmd": "search", "keyword": keyword],
+                token: pairToken,
+                timeout: 5
+            )
+            if response["ok"] as? Bool == false {
+                return response["message"] as? String ?? "电视没有响应"
+            }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// 已配对直接返回本地 token，未配对先走 `/v2/pair`（电视上会弹确认）。
+    func ensurePaired(_ device: CastDevice) async throws -> String {
+        if let existing = token(for: device.deviceId) {
+            return existing
+        }
+        return try await pair(device)
+    }
+
+    // MARK: - 配对管理（接口规范 4.14.7）
+
+    func pairs(for deviceId: String) async throws -> [DevicePair] {
+        let payload = try await APIClient.shared.devicePairs(deviceId: deviceId)
+        return payload.pairs ?? []
+    }
+
+    func updateNote(deviceId: String, phoneId: String, note: String) async throws {
+        try await APIClient.shared.updatePairNote(deviceId: deviceId, phoneId: phoneId, note: note)
+    }
+
+    /// 删除配对：服务端对不存在的记录也回成功，按「已删除」处理即可。
+    func removePair(deviceId: String, phoneId: String) async throws {
+        try await APIClient.shared.deletePair(deviceId: deviceId, phoneId: phoneId)
+        if phoneId == self.phoneId {
+            defaults.removeObject(forKey: Keys.tokenPrefix + deviceId)
+            pairedDeviceIds.remove(deviceId)
+        }
+    }
 }

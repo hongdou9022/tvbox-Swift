@@ -54,10 +54,12 @@ final class SessionStore: ObservableObject {
             password = saved
         }
 
+        // 接口规范 1.2：JWT 形如 x.y.z，旧的 Emby 订阅 token 是纯 hex，
+        // 必须用 `.` 判断来区分，否则旧 token 会被误判为有效。
         guard !server.isEmpty,
               let url = APIClient.normalizeServer(server),
               let token = Keychain.get(Keys.token),
-              !token.isEmpty else {
+              token.contains(".") else {
             return
         }
 
@@ -82,6 +84,15 @@ final class SessionStore: ObservableObject {
 
         isConnecting = true
         errorMessage = nil
+
+        // 接口规范 4.0：先探活，用来区分「地址填错」和「账号密码错」。
+        // 探活失败不要把用户留在「密码错误」的提示里。
+        let alive = await api.health(server: address)
+        guard alive else {
+            isConnecting = false
+            errorMessage = "连不上服务器：请检查地址与端口，并确认手机与服务器在同一网络"
+            return
+        }
 
         do {
             let response = try await api.login(

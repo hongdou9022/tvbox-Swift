@@ -22,8 +22,10 @@ struct MediaTarget: Hashable {
     }
 
     init(item: MediaItem) {
+        // 豆瓣条目只有豆瓣 id，没有可播放地址（规范 3.4 / 接口规范 4.3）。
+        // 把 libraryId 置空后 `isPlayable` 为 false，路由会自动改为「按剧名跳搜索」。
         self.init(
-            libraryId: item.libraryId,
+            libraryId: item.libraryId == DoubanService.sourceId ? "" : item.libraryId,
             videoId: item.videoId,
             sourceType: item.sourceType,
             title: item.title,

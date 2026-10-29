@@ -173,3 +173,35 @@ struct SheetGrabber: View {
             .padding(.bottom, 14)
     }
 }
+
+// MARK: - 角标（规范 3.4 / v1.8）
+
+/// 全站统一的角标底：半透明黑 `#66000000` + 1dp 浅色描边 `#66FFFFFF` + **4dp 圆角**。
+///
+/// 三处同款：推荐卡类型角标、推荐卡评分角标、搜索结果来源/集数角标。
+/// 不要在别处另写一套 `background`，否则圆角与描边会再次分叉。
+struct BadgeText: View {
+    let text: String
+    var color: Color = .white
+    var size: CGFloat = 9
+
+    var body: some View {
+        Text(text)
+            .font(Theme.font(size))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color(hex: 0x000000, opacity: 0.4))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .stroke(Color(hex: 0xFFFFFF, opacity: 0.4), lineWidth: 1)
+            )
+    }
+}
+
+/// 评分角标专用色（规范 3.4：金黄字）。
+let ratingBadgeColor = Color(hex: 0xFFD166)

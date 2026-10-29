@@ -4,6 +4,7 @@ import SwiftUI
 struct TVView: View {
     @EnvironmentObject private var session: SessionStore
     @StateObject private var cast = CastService.shared
+    @State private var selectedDevice: CastDevice?
 
     var body: some View {
         NavigationStack {
@@ -16,6 +17,12 @@ struct TVView: View {
         }
         .task {
             await cast.scan()
+        }
+        .sheet(item: $selectedDevice) { device in
+            RemoteControlSheet(device: device)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationBackground(Theme.bgDetail)
         }
     }
 
@@ -90,10 +97,15 @@ struct TVView: View {
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 9) {
                     ForEach(cast.devices) { device in
-                        deviceRow(device)
+                        Button {
+                            selectedDevice = device
+                        } label: {
+                            deviceRow(device)
+                        }
+                        .buttonStyle(TapScaleStyle())
                     }
 
-                    Text("在播放页点投屏图标即可把当前内容推到电视")
+                    Text("点电视进入遥控；在播放页点投屏图标可把当前内容推到电视")
                         .font(Theme.font(11))
                         .foregroundStyle(Theme.textFaint)
                         .multilineTextAlignment(.center)
@@ -135,6 +147,10 @@ struct TVView: View {
             Text(device.statusText(paired: paired))
                 .font(Theme.font(11))
                 .foregroundStyle(paired ? Theme.accent : Theme.textWeak)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(Theme.textFaint)
         }
         .padding(14)
         .background(

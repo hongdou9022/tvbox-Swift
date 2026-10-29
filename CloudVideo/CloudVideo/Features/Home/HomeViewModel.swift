@@ -1,7 +1,12 @@
 import SwiftUI
 import Combine
 
-/// 首页状态（规范第 3 章）。
+/// 首页状态（规范第 3 章 + 接口规范 6.1「本地直连优先」）。
+///
+/// 数据来源优先级：
+/// - 推荐页：豆瓣直连 → `/api/app/v1/recommend` 兜底
+/// - 分类页：豆瓣直连 → `/api/app/v1/category` 兜底
+/// - 横幅：`/api/proxy/tencent-banner-data` → 首个分区的条目兜底
 @MainActor
 final class HomeViewModel: ObservableObject {
 
@@ -15,6 +20,16 @@ final class HomeViewModel: ObservableObject {
 
         var id: String { rawValue }
         var isRecommend: Bool { self == .recommend }
+
+        var douban: DoubanService.Channel? {
+            switch self {
+            case .recommend: return nil
+            case .tv: return .tv
+            case .movie: return .movie
+            case .anime: return .anime
+            case .variety: return .variety
+            }
+        }
     }
 
     @Published var channel: Channel = .recommend
@@ -29,14 +44,14 @@ final class HomeViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     private let api = APIClient.shared
-    private var categories: [MediaCategory] = []
-    private var activeCategory: MediaCategory?
     private var page = 0
-    private var pageCount = 1
     private var didLoad = false
 
     /// 首屏需要铺满一屏，按 3 列估算约 18 个。
     private let firstScreenCount = 18
+
+    /// 推荐页分区顺序固定（规范 3.2-2）。
+    private let sectionChannels: [DoubanService.Channel] = [.tv, .movie, .anime, .variety]
 
     // MARK: - 首次加载
 
@@ -50,83 +65,83 @@ final class HomeViewModel: ObservableObject {
         isLoading = true
         errorMessage = nil
 
-        do {
-            async let homeTask = api.home()
-            async let recommendTask = api.recommend()
-
-            let home = try await homeTask
-            categories = home.categories ?? []
-
-            let recommend = try await recommendTask
-            applyRecommend(recommend)
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        await loadBanners()
+        await loadSections()
 
         isLoading = false
 
         if channel.isRecommend {
-            await loadRecommendTailIfNeeded()
-        } else {
-            await loadCategory(reset: true)
+            return
         }
+        await loadCategory(reset: true)
     }
 
-    private func applyRecommend(_ recommend: RecommendHome) {
-        sections = (recommend.sections ?? []).filter { !$0.items.isEmpty }
+    // MARK: - 横幅
 
-        // 规范 3.2-1：横幅轮播。后端只给一张 banner 时，用第一个分区的条目补足，
-        // 只有 1 张时轮播组件自身会停止自动切换。
-        var list: [RecommendItem] = []
-        if let banner = recommend.banner {
-            list.append(banner)
+    /// 接口规范 5.7：`isAd=true` 与空标题必须过滤；接口失败时横幅区整体隐藏。
+    private func loadBanners() async {
+        // tree-sitter 的 Swift 语法不支持 `if let x = try? await f()`，这里拆成两步
+        let payload = try? await api.tencentBanner()
+        if let items = payload?.items {
+            let usable = items.filter { $0.usable }
+            if !usable.isEmpty {
+                banners = usable.map { item in
+                    RecommendItem(
+                        id: item.id ?? UUID().uuidString,
+                        title: item.title ?? "",
+                        poster: item.poster,
+                        subtitle: item.caption,
+                        type: item.type,
+                        rating: nil,
+                        isNew: nil,
+                        sourceType: nil,
+                        libraryId: nil,
+                        videoId: nil
+                    )
+                }
+                return
+            }
         }
-        if let first = sections.first {
-            for item in first.items where list.count < 5 {
-                if !list.contains(where: { $0.id == item.id }) {
-                    list.append(item)
+
+        // 兜底：用首个分区的条目补足
+        banners = []
+    }
+
+    // MARK: - 推荐分区
+
+    private func loadSections() async {
+        var collected: [RecommendSection] = []
+
+        // 豆瓣直连优先，四个分区并发
+        await withTaskGroup(of: (DoubanService.Channel, [MediaItem]).self) { group in
+            for channel in sectionChannels {
+                group.addTask {
+                    let items = await DoubanService.fetch(channel, page: 1)
+                    return (channel, items)
                 }
             }
+            var buckets: [String: RecommendSection] = [:]
+            for await (channel, items) in group {
+                // 某分区无数据则整块跳过，不留空标题
+                guard !items.isEmpty else { continue }
+                buckets[channel.type] = DoubanService.sections(from: items, channel: channel)
+            }
+            collected = sectionChannels.compactMap { buckets[$0.type] }
         }
-        banners = list
-    }
 
-    /// 后端 `recommend` 可能返回空（mode 非 douban），此时退化成用首页分类首屏填充推荐区。
-    private func loadRecommendTailIfNeeded() async {
-        guard sections.isEmpty, let first = categories.first else { return }
-
-        isLoading = true
-        let pageData = try? await api.category(
-            libraryId: first.libraryId,
-            categoryId: first.id,
-            page: 1
-        )
-        if let pageData {
-            let items = pageData.items.prefix(6)
-            if !items.isEmpty {
-                sections = [
-                    RecommendSection(
-                        title: "\(first.name)推荐",
-                        type: first.name,
-                        items: items.map { item in
-                            RecommendItem(
-                                id: item.id,
-                                title: item.title,
-                                poster: item.poster,
-                                subtitle: item.metaLine,
-                                type: first.name,
-                                rating: nil,
-                                isNew: nil,
-                                sourceType: item.sourceType,
-                                libraryId: item.libraryId,
-                                videoId: item.videoId
-                            )
-                        }
-                    )
-                ]
+        if collected.isEmpty {
+            // 豆瓣不可达 → 后端兜底
+            let fallback = try? await api.recommend()
+            if let list = fallback?.sections {
+                collected = list.filter { !$0.items.isEmpty }
             }
         }
-        isLoading = false
+
+        sections = collected
+
+        if banners.isEmpty, let first = collected.first {
+            banners = Array(first.items.prefix(5))
+        }
     }
 
     // MARK: - 切换频道
@@ -141,26 +156,14 @@ final class HomeViewModel: ObservableObject {
         await loadCategory(reset: true)
     }
 
-    private func category(for channel: Channel) -> MediaCategory? {
-        if let exact = categories.first(where: { $0.name == channel.rawValue }) {
-            return exact
-        }
-        return categories.first { $0.name.contains(channel.rawValue) }
-    }
+    // MARK: - 分类页
 
     private func loadCategory(reset: Bool) async {
-        guard let matched = category(for: channel) else {
-            activeCategory = nil
-            gridItems = []
-            reachedEnd = true
-            return
-        }
+        guard let douban = channel.douban else { return }
 
         if reset {
-            activeCategory = matched
             gridItems = []
             page = 0
-            pageCount = 1
             reachedEnd = false
             isLoading = true
         }
@@ -169,19 +172,23 @@ final class HomeViewModel: ObservableObject {
             var fetched = 0
             repeat {
                 let next = page + 1
-                let result = try await api.category(
-                    libraryId: matched.libraryId,
-                    categoryId: matched.id,
-                    page: next
-                )
-                page = result.page
-                pageCount = result.pageCount
+                let items = await DoubanService.fetch(douban, page: next)
 
+                if items.isEmpty {
+                    if page == 0 {
+                        // 豆瓣不可达 → 服务端分类兜底
+                        try await loadCategoryViaServer()
+                    } else {
+                        reachedEnd = true
+                    }
+                    break
+                }
+
+                page = next
                 let existing = Set(gridItems.map { $0.id })
-                gridItems.append(contentsOf: result.items.filter { !existing.contains($0.id) })
-                fetched += result.items.count
-
-                reachedEnd = page >= pageCount || result.items.isEmpty
+                gridItems.append(contentsOf: items.filter { !existing.contains($0.id) })
+                fetched += items.count
+                reachedEnd = items.count < DoubanService.pageSize
 
                 // 规范 3.3：首屏铺满屏幕，连续拉页直到超过一屏
             } while reset && gridItems.count < firstScreenCount && !reachedEnd && fetched > 0
@@ -193,6 +200,26 @@ final class HomeViewModel: ObservableObject {
         isLoading = false
     }
 
+    /// 服务端分类兜底：只有它能给出可播放的 `libraryId + videoId`。
+    private func loadCategoryViaServer() async throws {
+        let home = try await api.home()
+        let categories = home.categories ?? []
+        guard let matched = categories.first(where: { $0.name == channel.rawValue })
+            ?? categories.first(where: { $0.name.contains(channel.rawValue) }) else {
+            reachedEnd = true
+            return
+        }
+
+        let result = try await api.category(
+            libraryId: matched.libraryId,
+            categoryId: matched.id,
+            page: 1
+        )
+        gridItems = result.items
+        page = result.page
+        reachedEnd = result.items.isEmpty || result.page >= result.pageCount
+    }
+
     // MARK: - 滚动续页
 
     /// 规范 3.3：距底部不足一屏时预加载下一页。
@@ -201,25 +228,17 @@ final class HomeViewModel: ObservableObject {
         guard !isLoading, !isLoadingMore, !reachedEnd else { return }
         guard let index = gridItems.firstIndex(of: currentItem) else { return }
         guard index >= gridItems.count - 9 else { return }
-
-        guard let matched = activeCategory else { return }
+        guard let douban = channel.douban else { return }
 
         isLoadingMore = true
-        do {
-            let next = page + 1
-            let result = try await api.category(
-                libraryId: matched.libraryId,
-                categoryId: matched.id,
-                page: next
-            )
-            page = result.page
-            pageCount = result.pageCount
-
-            let existing = Set(gridItems.map { $0.id })
-            gridItems.append(contentsOf: result.items.filter { !existing.contains($0.id) })
-            reachedEnd = page >= pageCount || result.items.isEmpty
-        } catch {
+        let items = await DoubanService.fetch(douban, page: page + 1)
+        if items.isEmpty {
             reachedEnd = true
+        } else {
+            page += 1
+            let existing = Set(gridItems.map { $0.id })
+            gridItems.append(contentsOf: items.filter { !existing.contains($0.id) })
+            reachedEnd = items.count < DoubanService.pageSize
         }
         isLoadingMore = false
     }

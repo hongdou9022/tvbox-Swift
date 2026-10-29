@@ -5,16 +5,17 @@ struct LiveChannel: Identifiable, Hashable {
     let name: String
     let group: String
     let url: String
-    let logo: String?
+    var logo: String? = nil
+    /// 非空时播放器要设置该 UA（接口规范 5.4）。
+    var ua: String? = nil
 
     var id: String { group + "|" + name + "|" + url }
 }
 
 /// IPTV 频道解析（规范第 6 章）。
 ///
-/// 后端 `/api/iptv/enabled` 下发的源有两种形态：
-/// - `content`：内嵌的 m3u / txt 文本
-/// - `url`：需要再拉一次的订阅地址
+/// 首选 `/api/iptv/{id}/channels` 的结构化分组；该接口不可用时
+/// 退回解析 `/api/iptv/enabled` 下发的 `content`（内嵌 m3u/txt）或 `url`（订阅地址）。
 enum LiveParser {
 
     static func isStreamURL(_ text: String) -> Bool {
@@ -97,7 +98,7 @@ enum LiveParser {
             let url = parts.dropFirst().joined(separator: ",").trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty, isStreamURL(url) else { continue }
 
-            result.append(LiveChannel(name: name, group: currentGroup, url: url, logo: nil))
+            result.append(LiveChannel(name: name, group: currentGroup, url: url))
         }
         return result
     }
@@ -115,8 +116,10 @@ enum LiveParser {
 @MainActor
 final class LiveViewModel: ObservableObject {
     @Published private(set) var channels: [LiveChannel] = []
+    /// 分组顺序按服务端下发，**不要重排**（接口规范 5.4）。
     @Published private(set) var groups: [String] = []
     @Published var selectedGroup: String?
+    @Published private(set) var rooms: [LiveRoom] = []
     @Published private(set) var isLoading = false
     @Published var errorText: String?
 
@@ -138,50 +141,98 @@ final class LiveViewModel: ObservableObject {
         isLoading = true
         errorText = nil
 
-        do {
-            let sources = try await api.iptvSources()
-            var collected: [LiveChannel] = []
+        await loadChannels()
+        await loadRooms()
 
-            for source in sources {
-                if let inline = source.inlineContent {
-                    collected.append(contentsOf: LiveParser.parse(inline, defaultGroup: source.name))
-                    continue
-                }
-                if let remote = source.remoteURL {
-                    if let text = await fetchText(remote) {
-                        collected.append(contentsOf: LiveParser.parse(text, defaultGroup: source.name))
+        if channels.isEmpty && rooms.isEmpty {
+            errorText = "还没有直播源。\n在服务端添加 IPTV 订阅后，频道会出现在这里。"
+        }
+        isLoading = false
+    }
+
+    // MARK: - IPTV 频道
+
+    private func loadChannels() async {
+        let sources = (try? await api.iptvSources()) ?? []
+        guard !sources.isEmpty else { return }
+
+        var collected: [LiveChannel] = []
+        var orderedGroups: [String] = []
+
+        // 第一条即默认源（按 is_default DESC, time DESC 排序）
+        for source in sources {
+            let payload = try? await api.iptvChannels(sourceId: source.id)
+
+            if let groups = payload?.groups, !groups.isEmpty {
+                for group in groups {
+                    let groupName = group.name.isEmpty ? source.name : group.name
+                    if !orderedGroups.contains(groupName) {
+                        orderedGroups.append(groupName)
+                    }
+                    for channel in group.channels ?? [] {
+                        guard let url = channel.firstURL, !url.isEmpty else { continue }
+                        collected.append(
+                            LiveChannel(
+                                name: channel.name,
+                                group: groupName,
+                                url: url,
+                                logo: channel.logo,
+                                ua: channel.userAgent
+                            )
+                        )
                     }
                 }
+                continue
             }
 
-            // 同名频道合并线路，避免同一个台重复出现
-            var merged: [String: LiveChannel] = [:]
-            var order: [String] = []
-            for channel in collected {
-                let key = channel.group + "|" + channel.name
-                if merged[key] == nil {
-                    merged[key] = channel
-                    order.append(key)
+            // 结构化接口不可用 → 退回内嵌内容 / 订阅地址
+            if let inline = source.inlineContent {
+                collected.append(contentsOf: LiveParser.parse(inline, defaultGroup: source.name))
+                continue
+            }
+            if let remote = source.remoteURL {
+                if let text = await fetchText(remote) {
+                    collected.append(contentsOf: LiveParser.parse(text, defaultGroup: source.name))
                 }
             }
-
-            channels = order.compactMap { merged[$0] }
-
-            var seenGroups: [String] = []
-            for channel in channels where !seenGroups.contains(channel.group) {
-                seenGroups.append(channel.group)
-            }
-            groups = seenGroups
-            selectedGroup = seenGroups.first
-
-            if channels.isEmpty {
-                errorText = "服务端还没有可用的直播源"
-            }
-        } catch {
-            errorText = error.localizedDescription
         }
 
-        isLoading = false
+        // 同名频道合并线路，避免同一个台重复出现
+        var merged: [String: LiveChannel] = [:]
+        var order: [String] = []
+        for channel in collected {
+            let key = channel.group + "|" + channel.name
+            if merged[key] == nil {
+                merged[key] = channel
+                order.append(key)
+            }
+        }
+        channels = order.compactMap { merged[$0] }
+
+        var seenGroups = orderedGroups
+        for channel in channels where !seenGroups.contains(channel.group) {
+            seenGroups.append(channel.group)
+        }
+        groups = seenGroups
+        if selectedGroup == nil || !seenGroups.contains(selectedGroup ?? "") {
+            selectedGroup = seenGroups.first
+        }
+    }
+
+    // MARK: - 直播间
+
+    private func loadRooms() async {
+        let page = try? await api.liveRooms(pageSize: 30)
+        rooms = (page?.list ?? []).filter { ($0.isActive ?? 1) != 0 }
+    }
+
+    /// 取直播间流地址。未开播返回 `nil`，由调用方提示而不是白屏。
+    func streamURL(for room: LiveRoom) async -> String? {
+        guard let platform = room.platform, let roomId = room.roomId else { return nil }
+
+        let info = try? await api.liveStream(platform: platform, roomId: roomId)
+        guard let info, info.isLive else { return nil }
+        return info.playURL
     }
 
     /// 订阅地址是纯文本 m3u/txt，不走 JSON 客户端。

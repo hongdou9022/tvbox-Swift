@@ -30,31 +30,16 @@ struct MediaCard: View {
             .overlay {
                 RemoteImage(urlString: poster, contentMode: .fill, cornerRadius: Theme.radiusCard)
             }
+            // 规范 3.4 / v1.8：类型角标与评分角标同款底（半透明 + 描边 + 4dp 圆角）
             .overlay(alignment: .topLeading) {
                 if !badge.isEmpty {
-                    Text(badge)
-                        .font(Theme.fontBadge)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(Color.black.opacity(0.55))
-                        )
+                    BadgeText(text: badge)
                         .padding(5)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if let rating, rating > 0 {
-                    Text(String(format: "★%.1f", rating))
-                        .font(Theme.fontBadge)
-                        .foregroundStyle(Color(hex: 0xF5C24A))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(Color.black.opacity(0.55))
-                        )
+                    BadgeText(text: String(format: "★%.1f", rating), color: ratingBadgeColor)
                         .padding(5)
                 }
             }
@@ -129,15 +114,7 @@ struct BannerCarousel: View {
         }
         .overlay(alignment: .topLeading) {
             if let type = item.type, !type.isEmpty {
-                Text(type)
-                    .font(Theme.fontBadge)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(Color.black.opacity(0.5))
-                    )
+                BadgeText(text: type)
                     .padding(10)
             }
         }
